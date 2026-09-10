@@ -1,0 +1,2560 @@
+from pathlib import Path
+import re
+import xml.etree.ElementTree as ET
+
+
+# ============================================================
+# MODULE 1 — JATS XML PARSER
+# ============================================================
+#
+# Input:
+#     JATS XML
+#
+# Process:
+#     解析 XML 結構
+#
+# Output:
+#     Structured Document
+#
+# 這個模組只負責：
+#     「XML 裡面有什麼？」
+#
+# 不負責：
+#     Word Count
+#     Sentence Count
+#     Position
+#     Index
+#     Search
+# ============================================================
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+DATA_DIR = PROJECT_ROOT / "data"
+
+
+# ============================================================
+# 1. XML 基本工具
+# ============================================================
+
+def local_name(element):
+
+    return element.tag.split("}")[-1]
+
+
+# ------------------------------------------------------------
+# 整理文字中的多餘空白與標點
+# ------------------------------------------------------------
+
+def normalize_inline_text(text):
+
+    if not text:
+        return ""
+
+    text = " ".join(
+        text.split()
+    )
+
+    # 移除標點符號前面多餘空白
+    text = re.sub(
+        r"\s+([,.;:!?%)\]])",
+        r"\1",
+        text
+    )
+
+    # 移除括號後面多餘空白
+    text = re.sub(
+        r"([(\[])\s+",
+        r"\1",
+        text
+    )
+
+    # Citation 被移除後可能留下 [ , ] 或 ()
+    text = re.sub(
+        r"\[\s*[,;–—\-]*\s*\]",
+        "",
+        text
+    )
+
+    text = re.sub(
+        r"\(\s*[,;–—\-]*\s*\)",
+        "",
+        text
+    )
+
+    return " ".join(
+        text.split()
+    )
+
+
+# ------------------------------------------------------------
+# 取得 Element 文字
+#
+# exclude_bibr=False
+#     保留 citation
+#
+# exclude_bibr=True
+#     跳過：
+#         <xref ref-type="bibr">
+#
+# 因此我們可以同時保留：
+#
+# RAW TEXT
+# CLEAN TEXT
+# ------------------------------------------------------------
+
+def get_text(
+    element,
+    exclude_bibr=False
+):
+
+    if element is None:
+        return ""
+
+    parts = []
+
+    def walk(node):
+
+        if node.text:
+            parts.append(
+                node.text
+            )
+
+        for child in node:
+
+            is_bibliographic_xref = (
+                local_name(child) == "xref"
+                and child.get("ref-type") == "bibr"
+            )
+
+            if not (
+                exclude_bibr
+                and is_bibliographic_xref
+            ):
+                walk(
+                    child
+                )
+
+            # 即使跳過 xref，
+            # xref 後面的文字仍然必須留下
+            if child.tail:
+                parts.append(
+                    child.tail
+                )
+
+    walk(
+        element
+    )
+
+    return normalize_inline_text(
+        " ".join(parts)
+    )
+
+
+# ============================================================
+# 2. 找真正的 <article>
+# ============================================================
+#
+# 支援：
+#
+# <article>
+#
+# 或：
+#
+# <OAI-PMH>
+#   ...
+#   <article>
+#
+# ============================================================
+
+def find_article_root(root):
+
+    if local_name(root) == "article":
+        return root
+
+    article = root.find(
+        ".//{*}article"
+    )
+
+    if article is None:
+
+        raise ValueError(
+            "No JATS <article> element found."
+        )
+
+    return article
+
+
+# ============================================================
+# 3. 選擇主要 Abstract
+# ============================================================
+#
+# 有些文章會同時存在：
+#
+# normal abstract
+# short abstract
+# graphical abstract
+#
+# 我們優先使用主要 Abstract，
+# 避免把 short abstract 又算一次。
+# ============================================================
+
+def choose_primary_abstract(
+    article_meta
+):
+
+    abstracts = article_meta.findall(
+        "./{*}abstract"
+    )
+
+    if not abstracts:
+        return None
+
+    ignored_types = {
+        "short",
+        "toc",
+        "graphical"
+    }
+
+    for abstract in abstracts:
+
+        abstract_type = (
+            abstract.get(
+                "abstract-type",
+                ""
+            )
+            .lower()
+        )
+
+        if abstract_type not in ignored_types:
+            return abstract
+
+    return abstracts[0]
+
+
+# ============================================================
+# 4. Abstract
+# ============================================================
+#
+# 重要修正：
+#
+# 不再使用：
+#
+#     .findall(".//p")
+#
+# 因為 nested <p> 可能重複計算。
+#
+# 現在遇到一個 <p> 後：
+#
+#     抓整個 paragraph
+#     然後停止往裡面找其他 <p>
+#
+# ============================================================
+
+def extract_abstract(
+    article_meta
+):
+
+    section_titles = []
+
+    raw_paragraphs = []
+
+    clean_paragraphs = []
+
+    abstract = choose_primary_abstract(
+        article_meta
+    )
+
+    if abstract is None:
+
+        return (
+            section_titles,
+            raw_paragraphs,
+            clean_paragraphs
+        )
+
+    # --------------------------------------------------------
+    # Section Titles
+    # --------------------------------------------------------
+
+    for sec in abstract.findall(
+        ".//{*}sec"
+    ):
+
+        title = sec.find(
+            "./{*}title"
+        )
+
+        text = get_text(
+            title
+        )
+
+        if text:
+
+            section_titles.append(
+                text
+            )
+
+    # --------------------------------------------------------
+    # Paragraphs
+    # --------------------------------------------------------
+
+    def walk(element):
+
+        for child in element:
+
+            tag = local_name(
+                child
+            )
+
+            if tag == "p":
+
+                raw_text = get_text(
+                    child,
+                    exclude_bibr=False
+                )
+
+                clean_text = get_text(
+                    child,
+                    exclude_bibr=True
+                )
+
+                if raw_text:
+
+                    raw_paragraphs.append(
+                        raw_text
+                    )
+
+                    clean_paragraphs.append(
+                        clean_text
+                    )
+
+                # 不繼續進入 nested p
+                # 避免重複
+                continue
+
+            walk(
+                child
+            )
+
+    walk(
+        abstract
+    )
+
+    return (
+        section_titles,
+        raw_paragraphs,
+        clean_paragraphs
+    )
+
+
+# ============================================================
+# 5. Body
+# ============================================================
+#
+# Body Paragraph：
+#
+# 保留 RAW
+# 也建立 CLEAN
+#
+# Figure / Table / Definition List
+# 不混入 Narrative Body。
+# ============================================================
+
+def extract_body(
+    body_element
+):
+
+    section_titles = []
+
+    raw_paragraphs = []
+
+    clean_paragraphs = []
+
+    if body_element is None:
+
+        return (
+            section_titles,
+            raw_paragraphs,
+            clean_paragraphs
+        )
+
+    skip_tags = {
+        "fig",
+        "table-wrap",
+        "supplementary-material",
+        "def-list"
+    }
+
+    def walk(
+        element,
+        parent_tag=None
+    ):
+
+        tag = local_name(
+            element
+        )
+
+        # ----------------------------------------------------
+        # 這些內容另外保存
+        # ----------------------------------------------------
+
+        if tag in skip_tags:
+            return
+
+        # ----------------------------------------------------
+        # Section Title
+        # ----------------------------------------------------
+
+        if (
+            tag == "title"
+            and parent_tag == "sec"
+        ):
+
+            text = get_text(
+                element
+            )
+
+            if text:
+
+                section_titles.append(
+                    text
+                )
+
+            return
+
+        # ----------------------------------------------------
+        # Paragraph
+        # ----------------------------------------------------
+
+        if tag == "p":
+
+            raw_text = get_text(
+                element,
+                exclude_bibr=False
+            )
+
+            clean_text = get_text(
+                element,
+                exclude_bibr=True
+            )
+
+            if raw_text:
+
+                raw_paragraphs.append(
+                    raw_text
+                )
+
+                clean_paragraphs.append(
+                    clean_text
+                )
+
+            return
+
+        # ----------------------------------------------------
+        # Recursive walk
+        # ----------------------------------------------------
+
+        for child in element:
+
+            walk(
+                child,
+                tag
+            )
+
+    walk(
+        body_element
+    )
+
+    return (
+        section_titles,
+        raw_paragraphs,
+        clean_paragraphs
+    )
+
+
+# ============================================================
+# 6. Definition / Abbreviation List
+# ============================================================
+#
+# 例如：
+#
+# AD  → Alzheimer's disease
+# MCI → Mild cognitive impairment
+#
+# 之前 PMC12382734 的 Abbreviation List
+# 被誤當成 Body 第一段。
+#
+# 現在獨立保存。
+# ============================================================
+
+def extract_definitions(
+    body_element
+):
+
+    definitions = []
+
+    if body_element is None:
+        return definitions
+
+    for item in body_element.findall(
+        ".//{*}def-list/{*}def-item"
+    ):
+
+        term = get_text(
+            item.find(
+                "./{*}term"
+            )
+        )
+
+        definition = get_text(
+            item.find(
+                "./{*}def"
+            ),
+            exclude_bibr=True
+        )
+
+        if term or definition:
+
+            definitions.append(
+                {
+                    "term": term,
+                    "definition": definition
+                }
+            )
+
+    return definitions
+
+
+# ============================================================
+# 7. Figures
+# ============================================================
+
+def extract_figures(
+    article
+):
+
+    figures = []
+
+    for fig in article.findall(
+        ".//{*}fig"
+    ):
+
+        figures.append(
+            {
+                "label":
+                    get_text(
+                        fig.find(
+                            "./{*}label"
+                        )
+                    ),
+
+                "caption":
+                    get_text(
+                        fig.find(
+                            "./{*}caption"
+                        ),
+                        exclude_bibr=True
+                    )
+            }
+        )
+
+    return figures
+
+
+# ============================================================
+# 8. Tables
+# ============================================================
+
+def extract_tables(
+    article
+):
+
+    tables = []
+
+    for table_wrap in article.findall(
+        ".//{*}table-wrap"
+    ):
+
+        label = get_text(
+            table_wrap.find(
+                "./{*}label"
+            )
+        )
+
+        caption = get_text(
+            table_wrap.find(
+                "./{*}caption"
+            ),
+            exclude_bibr=True
+        )
+
+        cells = []
+
+        for cell_tag in (
+            "th",
+            "td"
+        ):
+
+            for cell in table_wrap.findall(
+                f".//{{*}}{cell_tag}"
+            ):
+
+                text = get_text(
+                    cell,
+                    exclude_bibr=True
+                )
+
+                if text:
+
+                    cells.append(
+                        text
+                    )
+
+        tables.append(
+            {
+                "label":
+                    label,
+
+                "caption":
+                    caption,
+
+                "text":
+                    " ".join(
+                        cells
+                    )
+            }
+        )
+
+    return tables
+
+
+# ============================================================
+# 9. Acknowledgments
+# ============================================================
+
+def extract_acknowledgments(
+    article
+):
+
+    results = []
+
+    for ack in article.findall(
+        ".//{*}back/{*}ack"
+    ):
+
+        text = get_text(
+            ack,
+            exclude_bibr=True
+        )
+
+        if text:
+
+            results.append(
+                text
+            )
+
+    return results
+
+
+# ============================================================
+# 10. References
+# ============================================================
+
+def extract_references(
+    article
+):
+
+    references = []
+
+    for ref in article.findall(
+        ".//{*}ref-list/{*}ref"
+    ):
+
+        text = get_text(
+            ref
+        )
+
+        if text:
+
+            references.append(
+                text
+            )
+
+    return references
+
+
+# ============================================================
+# 11. Authors
+# ============================================================
+
+def extract_authors(
+    article_meta
+):
+
+    authors = []
+
+    for contrib in article_meta.findall(
+        ".//{*}contrib[@contrib-type='author']"
+    ):
+
+        surname = get_text(
+            contrib.find(
+                ".//{*}surname"
+            )
+        )
+
+        given_names = get_text(
+            contrib.find(
+                ".//{*}given-names"
+            )
+        )
+
+        full_name = (
+            f"{given_names} {surname}"
+        ).strip()
+
+        if full_name:
+
+            authors.append(
+                full_name
+            )
+
+    return authors
+
+
+# ============================================================
+# 12. Affiliations
+# ============================================================
+
+def extract_affiliations(
+    article_meta
+):
+
+    affiliations = []
+
+    for aff in article_meta.findall(
+        ".//{*}aff"
+    ):
+
+        text = get_text(
+            aff
+        )
+
+        if (
+            text
+            and text not in affiliations
+        ):
+
+            affiliations.append(
+                text
+            )
+
+    return affiliations
+
+
+# ============================================================
+# 13. Keywords
+# ============================================================
+
+def extract_keywords(
+    article_meta
+):
+
+    keywords = []
+
+    for keyword in article_meta.findall(
+        ".//{*}kwd-group/{*}kwd"
+    ):
+
+        text = get_text(
+            keyword
+        )
+
+        if text:
+
+            keywords.append(
+                text
+            )
+
+    return keywords
+
+
+# ============================================================
+# 14. Source Counts
+# ============================================================
+#
+# 注意：
+#
+# 這些是 JATS 裡原本寫好的數字。
+#
+# 不是我們自己的統計結果。
+# ============================================================
+
+def get_reported_count(
+    article_meta,
+    tag_name
+):
+
+    element = article_meta.find(
+        f".//{{*}}{tag_name}"
+    )
+
+    if element is None:
+        return None
+
+    value = element.get(
+        "count"
+    )
+
+    if value is None:
+        return None
+
+    try:
+        return int(
+            value
+        )
+
+    except ValueError:
+        return value
+
+
+# ============================================================
+# 15. 核心 Parser
+# ============================================================
+
+def _parse_jats_only(
+    xml_file
+):
+
+    tree = ET.parse(
+        xml_file
+    )
+
+    root = tree.getroot()
+
+    article = find_article_root(
+        root
+    )
+
+    front = article.find(
+        "./{*}front"
+    )
+
+    if front is None:
+
+        raise ValueError(
+            "JATS article has no <front>."
+        )
+
+    article_meta = front.find(
+        "./{*}article-meta"
+    )
+
+    if article_meta is None:
+
+        raise ValueError(
+            "JATS article has no <article-meta>."
+        )
+
+    # --------------------------------------------------------
+    # Metadata Elements
+    # --------------------------------------------------------
+
+    pmcid_element = article_meta.find(
+        "./{*}article-id[@pub-id-type='pmcid']"
+    )
+
+    pmid_element = article_meta.find(
+        "./{*}article-id[@pub-id-type='pmid']"
+    )
+
+    doi_element = article_meta.find(
+        "./{*}article-id[@pub-id-type='doi']"
+    )
+
+    journal_element = front.find(
+        "./{*}journal-meta/"
+        "{*}journal-title-group/"
+        "{*}journal-title"
+    )
+
+    title_element = article_meta.find(
+        "./{*}title-group/"
+        "{*}article-title"
+    )
+
+    # --------------------------------------------------------
+    # Metadata
+    # --------------------------------------------------------
+
+    authors = extract_authors(
+        article_meta
+    )
+
+    affiliations = extract_affiliations(
+        article_meta
+    )
+
+    keywords = extract_keywords(
+        article_meta
+    )
+
+    # --------------------------------------------------------
+    # Abstract
+    # --------------------------------------------------------
+
+    (
+        abstract_section_titles,
+        abstract_paragraphs,
+        abstract_paragraphs_clean
+    ) = extract_abstract(
+        article_meta
+    )
+
+    # --------------------------------------------------------
+    # Body
+    # --------------------------------------------------------
+
+    body_element = article.find(
+        "./{*}body"
+    )
+
+    (
+        section_titles,
+        body_paragraphs,
+        body_paragraphs_clean
+    ) = extract_body(
+        body_element
+    )
+
+    definitions = extract_definitions(
+        body_element
+    )
+
+    # --------------------------------------------------------
+    # Other Sections
+    # --------------------------------------------------------
+
+    figures = extract_figures(
+        article
+    )
+
+    tables = extract_tables(
+        article
+    )
+
+    acknowledgments = extract_acknowledgments(
+        article
+    )
+
+    references = extract_references(
+        article
+    )
+
+    # --------------------------------------------------------
+    # Structured Document
+    # --------------------------------------------------------
+
+    document = {
+
+        "filename":
+            Path(xml_file).name,
+
+        # 原始 XML 格式
+        "source_format":
+            "JATS",
+
+        "article_type":
+            article.get(
+                "article-type",
+                ""
+            ),
+
+        "pmcid":
+            get_text(
+                pmcid_element
+            ),
+
+        "pmid":
+            get_text(
+                pmid_element
+            ),
+
+        "doi":
+            get_text(
+                doi_element
+            ),
+
+        "journal":
+            get_text(
+                journal_element
+            ),
+
+        "title":
+            get_text(
+                title_element
+            ),
+
+        "authors":
+            authors,
+
+        "affiliations":
+            affiliations,
+
+        "keywords":
+            keywords,
+
+        # Abstract RAW / CLEAN
+        "abstract_section_titles":
+            abstract_section_titles,
+
+        "abstract_paragraphs":
+            abstract_paragraphs,
+
+        "abstract_paragraphs_clean":
+            abstract_paragraphs_clean,
+
+        "abstract":
+            " ".join(
+                abstract_paragraphs
+            ),
+
+        "abstract_clean":
+            " ".join(
+                abstract_paragraphs_clean
+            ),
+
+        # Body RAW / CLEAN
+        "section_titles":
+            section_titles,
+
+        "body_paragraphs":
+            body_paragraphs,
+
+        "body_paragraphs_clean":
+            body_paragraphs_clean,
+
+        "body":
+            " ".join(
+                body_paragraphs
+            ),
+
+        "body_clean":
+            " ".join(
+                body_paragraphs_clean
+            ),
+
+        # Separate structured content
+        "definitions":
+            definitions,
+
+        "figures":
+            figures,
+
+        "tables":
+            tables,
+
+        "acknowledgments":
+            acknowledgments,
+
+        "references":
+            references,
+
+        # JATS Source Counts
+        "reported_word_count":
+            get_reported_count(
+                article_meta,
+                "word-count"
+            ),
+
+        "reported_figure_count":
+            get_reported_count(
+                article_meta,
+                "fig-count"
+            ),
+
+        "reported_table_count":
+            get_reported_count(
+                article_meta,
+                "table-count"
+            ),
+
+        "reported_ref_count":
+            get_reported_count(
+                article_meta,
+                "ref-count"
+            ),
+
+        "reported_page_count":
+            get_reported_count(
+                article_meta,
+                "page-count"
+            )
+    }
+
+    return document
+
+
+
+# ============================================================
+# 16. BioC XML 工具
+# ============================================================
+#
+# BioC 官方核心結構：
+#
+# <collection>
+#   <document>
+#     <id>...</id>
+#     <passage>
+#       <infon key="type">title / abstract / paragraph ...</infon>
+#       <offset>...</offset>
+#       <text>...</text>
+#     </passage>
+#   </document>
+# </collection>
+#
+# 本專案的策略：
+#
+# BioC XML
+#     ↓
+# M01 轉成與 JATS 相同的 Structured Document
+#     ↓
+# M02 ~ M06 不需要知道原始格式
+#
+# 注意：
+# BioC 的 infon 是可延伸的 key-value，
+# 不同 corpus 的 passage type 可能不同。
+# 因此這裡優先支援 NCBI BioC / BioC-PMC 常見型態，
+# 並對未知 passage 做保守 fallback。
+# ============================================================
+
+
+def get_bioc_infons(
+    element
+):
+
+    infons = {}
+
+    if element is None:
+        return infons
+
+    for infon in element.findall(
+        "./{*}infon"
+    ):
+
+        key = (
+            infon.get(
+                "key",
+                ""
+            )
+            .strip()
+            .lower()
+        )
+
+        value = normalize_inline_text(
+            infon.text
+            or ""
+        )
+
+        if key:
+
+            infons[key] = value
+
+    return infons
+
+
+def get_bioc_passage_text(
+    passage
+):
+
+    text_element = passage.find(
+        "./{*}text"
+    )
+
+    if (
+        text_element is not None
+        and text_element.text
+    ):
+
+        return normalize_inline_text(
+            text_element.text
+        )
+
+    # 有些 BioC 可能只有 sentence/text
+    sentence_texts = []
+
+    for sentence in passage.findall(
+        "./{*}sentence"
+    ):
+
+        sentence_text = sentence.find(
+            "./{*}text"
+        )
+
+        text = normalize_inline_text(
+            (
+                sentence_text.text
+                if sentence_text is not None
+                else ""
+            )
+            or ""
+        )
+
+        if text:
+
+            sentence_texts.append(
+                text
+            )
+
+    return " ".join(
+        sentence_texts
+    )
+
+
+def clean_embedded_bioc_markup(
+    text
+):
+
+    if not text:
+        return ""
+
+    # BioC-PMC 的 table passage 有時可能把 PMC XML
+    # 以文字形式放在 <text> 中。
+    #
+    # 只有看起來真的含有 XML/HTML tag 時才處理，
+    # 避免一般數學符號 < > 被誤刪。
+    if not re.search(
+        r"</?[A-Za-z][A-Za-z0-9:_-]*(?:\s[^>]*)?>",
+        text
+    ):
+
+        return normalize_inline_text(
+            text
+        )
+
+    try:
+
+        wrapped = ET.fromstring(
+            f"<root>{text}</root>"
+        )
+
+        cleaned = " ".join(
+            part.strip()
+            for part in wrapped.itertext()
+            if part.strip()
+        )
+
+        return normalize_inline_text(
+            cleaned
+        )
+
+    except ET.ParseError:
+
+        # 保守 fallback：
+        # 只移除看起來像 tag 的片段。
+        cleaned = re.sub(
+            r"</?[A-Za-z][A-Za-z0-9:_-]*(?:\s[^>]*)?>",
+            " ",
+            text
+        )
+
+        return normalize_inline_text(
+            cleaned
+        )
+
+
+def extract_bioc_author_infons(
+    bioc_document
+):
+
+    authors = []
+
+    for passage in bioc_document.findall(
+        "./{*}passage"
+    ):
+
+        infons = get_bioc_infons(
+            passage
+        )
+
+        section_type = (
+            infons.get(
+                "section_type",
+                ""
+            )
+            or infons.get(
+                "section-type",
+                ""
+            )
+        ).strip().upper()
+
+        passage_type = infons.get(
+            "type",
+            ""
+        ).strip().lower()
+
+        # NCBI BioC-PMC 的文章作者通常放在
+        # TITLE / front passage 的 name_0, name_1...
+        #
+        # Reference passages 也會有 name_0, name_1，
+        # 那些是「參考文獻作者」，不能混進文章作者。
+        if not (
+            section_type == "TITLE"
+            or passage_type == "front"
+        ):
+
+            continue
+
+        name_items = sorted(
+            (
+                key,
+                value
+            )
+            for key, value in infons.items()
+            if re.fullmatch(
+                r"name_\d+",
+                key
+            )
+        )
+
+        for _, value in name_items:
+
+            surname_match = re.search(
+                r"(?:^|;)surname:([^;]+)",
+                value
+            )
+
+            given_match = re.search(
+                r"(?:^|;)given-names:([^;]+)",
+                value
+            )
+
+            surname = (
+                surname_match.group(1).strip()
+                if surname_match
+                else ""
+            )
+
+            given_names = (
+                given_match.group(1).strip()
+                if given_match
+                else ""
+            )
+
+            full_name = (
+                f"{given_names} {surname}"
+            ).strip()
+
+            if (
+                full_name
+                and full_name not in authors
+            ):
+
+                authors.append(
+                    full_name
+                )
+
+    return authors
+
+
+def find_bioc_document(
+    root
+):
+
+    # BioC 單一 document 也可直接作為 root
+    if (
+        local_name(root) == "document"
+        and root.find(
+            "./{*}passage"
+        ) is not None
+    ):
+
+        return root
+
+    documents = root.findall(
+        "./{*}document"
+    )
+
+    if not documents:
+
+        documents = root.findall(
+            ".//{*}document"
+        )
+
+    # 避免把一般 XML 的 <document> 誤認為 BioC
+    documents = [
+        document
+        for document in documents
+        if document.find(
+            "./{*}passage"
+        ) is not None
+    ]
+
+    if not documents:
+
+        raise ValueError(
+            "No BioC <document>/<passage> structure found."
+        )
+
+    # 目前整個 Pipeline 的一個上傳檔案 = 一篇文章。
+    # 若一個 BioC collection 塞多篇，明確報錯，
+    # 避免默默只讀第一篇造成錯誤統計。
+    if len(documents) > 1:
+
+        raise ValueError(
+            "BioC XML contains multiple <document> elements. "
+            "Please upload one BioC document per XML file."
+        )
+
+    return documents[0]
+
+
+def detect_xml_format(
+    xml_file
+):
+
+    tree = ET.parse(
+        xml_file
+    )
+
+    root = tree.getroot()
+
+    # --------------------------------------------------------
+    # JATS
+    # --------------------------------------------------------
+
+    if local_name(root) == "article":
+
+        return "JATS"
+
+    if root.find(
+        ".//{*}article"
+    ) is not None:
+
+        return "JATS"
+
+    # --------------------------------------------------------
+    # BioC
+    # --------------------------------------------------------
+
+    if (
+        local_name(root) == "collection"
+        and root.find(
+            "./{*}document/{*}passage"
+        ) is not None
+    ):
+
+        return "BioC"
+
+    if (
+        local_name(root) == "document"
+        and root.find(
+            "./{*}passage"
+        ) is not None
+    ):
+
+        return "BioC"
+
+    raise ValueError(
+        "Unsupported XML format. "
+        "This system currently supports JATS XML "
+        "and BioC XML."
+    )
+
+
+# ============================================================
+# 17. BioC Passage 分類
+# ============================================================
+
+BIOC_BODY_SECTION_TYPES = {
+    "intro",
+    "introduction",
+    "methods",
+    "method",
+    "materials",
+    "materials_methods",
+    "materials and methods",
+    "results",
+    "discussion",
+    "discuss",
+    "conclusion",
+    "conclusions",
+    "concl",
+    "background",
+    "case",
+    "supplement",
+}
+
+
+def classify_bioc_passage(
+    passage_type,
+    section_type,
+    title_already_found
+):
+
+    passage_type = (
+        passage_type
+        or ""
+    ).strip().lower()
+
+    section_type = (
+        section_type
+        or ""
+    ).strip().lower()
+
+    combined = (
+        f"{passage_type} {section_type}"
+    )
+
+    # --------------------------------------------------------
+    # Article Title
+    # --------------------------------------------------------
+
+    if (
+        passage_type
+        in {
+            "title",
+            "article-title",
+            "article_title"
+        }
+        or section_type == "title"
+    ):
+
+        if not title_already_found:
+
+            return "title"
+
+        # 第二個以上 title 通常較可能是 section title
+        return "section_title"
+
+    # --------------------------------------------------------
+    # Abstract
+    # --------------------------------------------------------
+
+    if (
+        "abstract" in combined
+    ):
+
+        if (
+            "title" in passage_type
+            or "title" in section_type
+        ):
+
+            return "abstract_section_title"
+
+        return "abstract"
+
+    # --------------------------------------------------------
+    # Author / Affiliation / Keyword
+    # --------------------------------------------------------
+
+    if (
+        "author" in combined
+        and "reference" not in combined
+    ):
+
+        return "author"
+
+    if (
+        "affiliation" in combined
+        or passage_type == "aff"
+    ):
+
+        return "affiliation"
+
+    if (
+        "keyword" in combined
+        or passage_type == "kwd"
+    ):
+
+        return "keyword"
+
+    # --------------------------------------------------------
+    # References
+    # --------------------------------------------------------
+
+    if (
+        passage_type
+        in {
+            "ref",
+            "reference",
+            "references"
+        }
+        or section_type
+        in {
+            "ref",
+            "reference",
+            "references"
+        }
+    ):
+
+        return "reference"
+
+    # --------------------------------------------------------
+    # Acknowledgments
+    # --------------------------------------------------------
+
+    if (
+        passage_type
+        in {
+            "ack",
+            "acknowledgment",
+            "acknowledgement",
+            "acknowledgments",
+            "acknowledgements"
+        }
+        or section_type
+        in {
+            "ack",
+            "acknowledgment",
+            "acknowledgement"
+        }
+    ):
+
+        return "acknowledgment"
+
+    # --------------------------------------------------------
+    # Figure
+    # --------------------------------------------------------
+
+    if (
+        "fig" in passage_type
+        or section_type == "fig"
+        or "figure" in section_type
+    ):
+
+        if (
+            "label" in passage_type
+        ):
+
+            return "figure_label"
+
+        return "figure_caption"
+
+    # --------------------------------------------------------
+    # Table
+    # --------------------------------------------------------
+
+    if (
+        "table" in passage_type
+        or section_type == "table"
+    ):
+
+        if (
+            "label" in passage_type
+        ):
+
+            return "table_label"
+
+        if (
+            "caption" in passage_type
+            or "title" in passage_type
+        ):
+
+            return "table_caption"
+
+        return "table_text"
+
+    # --------------------------------------------------------
+    # Section Title
+    # --------------------------------------------------------
+
+    if (
+        passage_type
+        in {
+            "section_title",
+            "section-title",
+            "sectitle",
+            "subtitle"
+        }
+        or (
+            "title" in passage_type
+            and title_already_found
+        )
+    ):
+
+        return "section_title"
+
+    # --------------------------------------------------------
+    # Definition
+    # --------------------------------------------------------
+
+    if (
+        "definition" in combined
+        or passage_type
+        in {
+            "def",
+            "definition"
+        }
+    ):
+
+        return "definition"
+
+    # --------------------------------------------------------
+    # Front / metadata passage
+    #
+    # 不把整段 front 直接塞入 body，
+    # 避免 metadata 重複進搜尋。
+    # --------------------------------------------------------
+
+    if (
+        passage_type == "front"
+        or section_type == "front"
+    ):
+
+        return "front"
+
+    # --------------------------------------------------------
+    # Body
+    #
+    # NCBI BioC-PMC 常見 type=paragraph，
+    # section_type 再指出 INTRO / METHODS / RESULTS...
+    # --------------------------------------------------------
+
+    if (
+        passage_type
+        in {
+            "paragraph",
+            "body",
+            "text",
+            "p"
+        }
+        or section_type in BIOC_BODY_SECTION_TYPES
+    ):
+
+        return "body"
+
+    # --------------------------------------------------------
+    # 未知 Passage：
+    #
+    # 有文字時保守視為 body，避免老師給的 BioC
+    # 使用其他自訂 type 而整段漏掉。
+    # --------------------------------------------------------
+
+    return "body"
+
+
+# ============================================================
+# 18. BioC Parser
+# ============================================================
+
+def parse_bioc(
+    xml_file
+):
+
+    tree = ET.parse(
+        xml_file
+    )
+
+    root = tree.getroot()
+
+    bioc_document = find_bioc_document(
+        root
+    )
+
+    document_infons = get_bioc_infons(
+        bioc_document
+    )
+
+    document_id_element = bioc_document.find(
+        "./{*}id"
+    )
+
+    document_id = normalize_inline_text(
+        (
+            document_id_element.text
+            if document_id_element is not None
+            else ""
+        )
+        or ""
+    )
+
+    # --------------------------------------------------------
+    # BioC Metadata
+    # --------------------------------------------------------
+    #
+    # NCBI BioC-PMC 的 article metadata 常放在「第一個 passage」
+    # 的 <infon>，例如：
+    #
+    #   article-id_pmc  = 10665088
+    #   article-id_pmid = 38053812
+    #   article-id_doi  = ...
+    #
+    # 不一定放在 <document> 本身。
+    # 因此先整合 document infon + 所有 passage infon。
+    # --------------------------------------------------------
+
+    all_bioc_infons = dict(
+        document_infons
+    )
+
+    for passage in bioc_document.findall(
+        "./{*}passage"
+    ):
+
+        passage_infons_for_metadata = get_bioc_infons(
+            passage
+        )
+
+        for key, value in passage_infons_for_metadata.items():
+
+            if (
+                value
+                and key not in all_bioc_infons
+            ):
+
+                all_bioc_infons[key] = value
+
+    pmcid = (
+        all_bioc_infons.get(
+            "pmcid",
+            ""
+        )
+        or all_bioc_infons.get(
+            "pmc",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article-id_pmc",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article_id_pmc",
+            ""
+        )
+    )
+
+    # NCBI BioC-PMC 常只存數字 10665088，
+    # UI / JATS 端則使用 PMC10665088。
+    if pmcid:
+
+        pmcid = pmcid.strip()
+
+        if (
+            pmcid.isdigit()
+        ):
+
+            pmcid = (
+                "PMC"
+                + pmcid
+            )
+
+        elif not pmcid.upper().startswith(
+            "PMC"
+        ):
+
+            pmc_match = re.search(
+                r"PMC\d+",
+                pmcid,
+                flags=re.IGNORECASE
+            )
+
+            if pmc_match:
+
+                pmcid = pmc_match.group(
+                    0
+                ).upper()
+
+    pmid = (
+        all_bioc_infons.get(
+            "pmid",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article-id_pmid",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article_id_pmid",
+            ""
+        )
+    )
+
+    doi = (
+        all_bioc_infons.get(
+            "doi",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article_doi",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article-id_doi",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article_id_doi",
+            ""
+        )
+    )
+
+    journal = (
+        all_bioc_infons.get(
+            "journal",
+            ""
+        )
+        or all_bioc_infons.get(
+            "journal-title",
+            ""
+        )
+        or all_bioc_infons.get(
+            "journal_title",
+            ""
+        )
+    )
+
+    article_type = (
+        all_bioc_infons.get(
+            "article-type",
+            ""
+        )
+        or all_bioc_infons.get(
+            "article_type",
+            ""
+        )
+        or "bioc"
+    )
+
+    # --------------------------------------------------------
+    # document <id> 只做 fallback。
+    #
+    # NCBI BioC-PMC 的 <document><id> 有時是「PMC 數字部分」
+    # （例如 10665088），不能直接假設它是 PMID。
+    # --------------------------------------------------------
+
+    if (
+        not pmcid
+        and document_id.upper().startswith(
+            "PMC"
+        )
+    ):
+
+        pmcid = document_id.upper()
+
+    if (
+        not pmcid
+        and not pmid
+        and document_id.isdigit()
+    ):
+
+        # 無其他 metadata 時才保留舊 fallback。
+        pmid = document_id
+
+    # --------------------------------------------------------
+    # 統一輸出欄位
+    # --------------------------------------------------------
+
+    title = ""
+
+    authors = extract_bioc_author_infons(
+        bioc_document
+    )
+
+    affiliations = []
+
+    keywords = []
+
+    abstract_section_titles = []
+
+    abstract_paragraphs = []
+
+    abstract_paragraphs_clean = []
+
+    section_titles = []
+
+    body_paragraphs = []
+
+    body_paragraphs_clean = []
+
+    definitions = []
+
+    figures = []
+
+    tables = []
+
+    acknowledgments = []
+
+    references = []
+
+    # --------------------------------------------------------
+    # 每個 passage
+    # --------------------------------------------------------
+
+    for passage in bioc_document.findall(
+        "./{*}passage"
+    ):
+
+        passage_infons = get_bioc_infons(
+            passage
+        )
+
+        passage_type = passage_infons.get(
+            "type",
+            ""
+        )
+
+        section_type = (
+            passage_infons.get(
+                "section_type",
+                ""
+            )
+            or passage_infons.get(
+                "section-type",
+                ""
+            )
+        )
+
+        text = get_bioc_passage_text(
+            passage
+        )
+
+        if not text:
+            continue
+
+        category = classify_bioc_passage(
+            passage_type,
+            section_type,
+            bool(title)
+        )
+
+        # Table text may contain embedded PMC XML markup.
+        if category == "table_text":
+
+            text = clean_embedded_bioc_markup(
+                text
+            )
+
+        # ----------------------------------------------------
+        # Article title
+        # ----------------------------------------------------
+
+        if category == "title":
+
+            if not title:
+                title = text
+
+            else:
+                section_titles.append(
+                    text
+                )
+
+        # ----------------------------------------------------
+        # Abstract
+        # ----------------------------------------------------
+
+        elif category == "abstract":
+
+            abstract_paragraphs.append(
+                text
+            )
+
+            # BioC passage text 已沒有 JATS inline bibr tag，
+            # RAW / CLEAN 先保持相同。
+            abstract_paragraphs_clean.append(
+                text
+            )
+
+        elif category == "abstract_section_title":
+
+            abstract_section_titles.append(
+                text
+            )
+
+        # ----------------------------------------------------
+        # Metadata-like passages
+        # ----------------------------------------------------
+
+        elif category == "author":
+
+            if text not in authors:
+                authors.append(
+                    text
+                )
+
+        elif category == "affiliation":
+
+            if text not in affiliations:
+                affiliations.append(
+                    text
+                )
+
+        elif category == "keyword":
+
+            if text not in keywords:
+                keywords.append(
+                    text
+                )
+
+        # ----------------------------------------------------
+        # Body
+        # ----------------------------------------------------
+
+        elif category == "section_title":
+
+            section_titles.append(
+                text
+            )
+
+        elif category == "body":
+
+            body_paragraphs.append(
+                text
+            )
+
+            body_paragraphs_clean.append(
+                text
+            )
+
+        # ----------------------------------------------------
+        # Definitions
+        # ----------------------------------------------------
+
+        elif category == "definition":
+
+            definitions.append(
+                {
+                    "term":
+                        "",
+
+                    "definition":
+                        text
+                }
+            )
+
+        # ----------------------------------------------------
+        # Figures
+        # ----------------------------------------------------
+
+        elif category == "figure_label":
+
+            figures.append(
+                {
+                    "label":
+                        text,
+
+                    "caption":
+                        ""
+                }
+            )
+
+        elif category == "figure_caption":
+
+            figures.append(
+                {
+                    "label":
+                        "",
+
+                    "caption":
+                        text
+                }
+            )
+
+        # ----------------------------------------------------
+        # Tables
+        # ----------------------------------------------------
+
+        elif category == "table_label":
+
+            tables.append(
+                {
+                    "label":
+                        text,
+
+                    "caption":
+                        "",
+
+                    "text":
+                        ""
+                }
+            )
+
+        elif category == "table_caption":
+
+            tables.append(
+                {
+                    "label":
+                        "",
+
+                    "caption":
+                        text,
+
+                    "text":
+                        ""
+                }
+            )
+
+        elif category == "table_text":
+
+            tables.append(
+                {
+                    "label":
+                        "",
+
+                    "caption":
+                        "",
+
+                    "text":
+                        text
+                }
+            )
+
+        # ----------------------------------------------------
+        # Acknowledgments / References
+        # ----------------------------------------------------
+
+        elif category == "acknowledgment":
+
+            acknowledgments.append(
+                text
+            )
+
+        elif category == "reference":
+
+            references.append(
+                text
+            )
+
+        # front 不重複塞入正文
+        elif category == "front":
+
+            pass
+
+    # --------------------------------------------------------
+    # 若 BioC passage 沒提供明確 title，
+    # 仍保留一個可辨識名稱。
+    # --------------------------------------------------------
+
+    if not title:
+
+        title = (
+            document_infons.get(
+                "title",
+                ""
+            )
+            or document_id
+            or Path(xml_file).stem
+        )
+
+    # --------------------------------------------------------
+    # 某些 BioC corpus 會把 metadata 放在 document infon。
+    # --------------------------------------------------------
+
+    author_infon = (
+        document_infons.get(
+            "author",
+            ""
+        )
+        or document_infons.get(
+            "authors",
+            ""
+        )
+    )
+
+    if (
+        author_infon
+        and author_infon not in authors
+    ):
+
+        authors.append(
+            author_infon
+        )
+
+    keyword_infon = (
+        document_infons.get(
+            "keyword",
+            ""
+        )
+        or document_infons.get(
+            "keywords",
+            ""
+        )
+    )
+
+    if (
+        keyword_infon
+        and keyword_infon not in keywords
+    ):
+
+        keywords.append(
+            keyword_infon
+        )
+
+    # --------------------------------------------------------
+    # Structured Document
+    #
+    # 欄位名稱與 JATS Parser 完全對齊，
+    # 讓 M02 ~ M06 不需要改核心介面。
+    # --------------------------------------------------------
+
+    document = {
+
+        "filename":
+            Path(xml_file).name,
+
+        "source_format":
+            "BioC",
+
+        "article_type":
+            article_type,
+
+        "pmcid":
+            pmcid,
+
+        "pmid":
+            pmid,
+
+        "doi":
+            doi,
+
+        "journal":
+            journal,
+
+        "title":
+            title,
+
+        "authors":
+            authors,
+
+        "affiliations":
+            affiliations,
+
+        "keywords":
+            keywords,
+
+        # Abstract RAW / CLEAN
+        "abstract_section_titles":
+            abstract_section_titles,
+
+        "abstract_paragraphs":
+            abstract_paragraphs,
+
+        "abstract_paragraphs_clean":
+            abstract_paragraphs_clean,
+
+        "abstract":
+            " ".join(
+                abstract_paragraphs
+            ),
+
+        "abstract_clean":
+            " ".join(
+                abstract_paragraphs_clean
+            ),
+
+        # Body RAW / CLEAN
+        "section_titles":
+            section_titles,
+
+        "body_paragraphs":
+            body_paragraphs,
+
+        "body_paragraphs_clean":
+            body_paragraphs_clean,
+
+        "body":
+            " ".join(
+                body_paragraphs
+            ),
+
+        "body_clean":
+            " ".join(
+                body_paragraphs_clean
+            ),
+
+        # Separate structured content
+        "definitions":
+            definitions,
+
+        "figures":
+            figures,
+
+        "tables":
+            tables,
+
+        "acknowledgments":
+            acknowledgments,
+
+        "references":
+            references,
+
+        # BioC 標準本身沒有 JATS counts 這組欄位。
+        # 後續 M02 會自動使用 Computed Word Count。
+        "reported_word_count":
+            None,
+
+        "reported_figure_count":
+            None,
+
+        "reported_table_count":
+            None,
+
+        "reported_ref_count":
+            None,
+
+        "reported_page_count":
+            None
+    }
+
+    return document
+
+
+# ============================================================
+# 19. 對外統一入口
+# ============================================================
+#
+# 為了不修改 M02 ~ M06 原本：
+#
+#     from m01_jats_parser import parse_jats
+#
+# 這個函式名稱暫時保留。
+#
+# 但它現在實際上是：
+#
+#     XML Auto Detector / Dispatcher
+#
+# JATS → 原本 JATS Parser
+# BioC → BioC Parser
+# ============================================================
+
+def parse_jats(
+    xml_file
+):
+
+    xml_format = detect_xml_format(
+        xml_file
+    )
+
+    if xml_format == "JATS":
+
+        return _parse_jats_only(
+            xml_file
+        )
+
+    if xml_format == "BioC":
+
+        return parse_bioc(
+            xml_file
+        )
+
+    raise ValueError(
+        f"Unsupported XML format: {xml_format}"
+    )
+
+
+
+# ============================================================
+# 16. Parser Test
+# ============================================================
+
+if __name__ == "__main__":
+
+    xml_files = sorted(
+        DATA_DIR.glob(
+            "*.xml"
+        )
+    )
+
+    print(
+        "=" * 85
+    )
+
+    print(
+        "MODULE 1 - JATS / BioC PARSER TEST"
+    )
+
+    print(
+        f"Found {len(xml_files)} XML files"
+    )
+
+    print(
+        "=" * 85
+    )
+
+    for xml_file in xml_files:
+
+        try:
+
+            document = parse_jats(
+                xml_file
+            )
+
+            print()
+
+            print(
+                f"File              : "
+                f"{document['filename']}"
+            )
+
+            print(
+                f"Source Format     : "
+                f"{document.get('source_format', 'JATS')}"
+            )
+
+            print(
+                f"PMCID             : "
+                f"{document['pmcid']}"
+            )
+
+            print(
+                f"Article Type      : "
+                f"{document['article_type']}"
+            )
+
+            print(
+                f"Abstract Paragraph: "
+                f"{len(document['abstract_paragraphs'])}"
+            )
+
+            print(
+                f"Body Paragraph    : "
+                f"{len(document['body_paragraphs'])}"
+            )
+
+            print(
+                f"Definitions       : "
+                f"{len(document['definitions'])}"
+            )
+
+            print(
+                f"Figures           : "
+                f"{len(document['figures'])}"
+            )
+
+            print(
+                f"Tables            : "
+                f"{len(document['tables'])}"
+            )
+
+            print(
+                f"References        : "
+                f"{len(document['references'])}"
+            )
+
+            print(
+                f"JATS Word Count   : "
+                f"{document['reported_word_count']}"
+            )
+
+            print(
+                "-" * 85
+            )
+
+        except Exception as error:
+
+            print()
+
+            print(
+                f"ERROR: "
+                f"{xml_file.name}"
+            )
+
+            print(
+                f"{type(error).__name__}: "
+                f"{error}"
+            )
+
+            print(
+                "-" * 85
+            )
