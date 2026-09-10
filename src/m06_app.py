@@ -1137,7 +1137,7 @@ with st.sidebar:
     st.header("Keyword-based Full-Text Matching")
 
     st.caption(
-        "Educational prototype for PMC JATS XML"
+        "Educational prototype for PMC JATS and BioC XML"
     )
 
     st.divider()
@@ -1191,7 +1191,7 @@ st.title(
 )
 
 st.caption(
-    "Upload JATS XML → Build Index → Search → Open Article → Locate Match"
+    "Upload XML → Build Index → Search → Open Article → Locate Match"
 )
 
 
@@ -1202,7 +1202,7 @@ st.caption(
 st.header("1. Load Documents")
 
 uploaded_files = st.file_uploader(
-    "Upload one or more PMC JATS XML files",
+    "Upload one or more PMC JATS / BioC XML files",
     type=["xml"],
     accept_multiple_files=True,
 )
@@ -1305,7 +1305,7 @@ if st.session_state["build_errors"]:
 
 if not st.session_state["index_ready"]:
     st.info(
-        "Upload JATS XML files and click "
+        "Upload JATS / BioCXML files and click "
         "'Analyze / Build Index' to begin."
     )
     st.stop()
