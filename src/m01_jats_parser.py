@@ -4,11 +4,11 @@ import xml.etree.ElementTree as ET
 
 
 # ============================================================
-# MODULE 1 — JATS XML PARSER
+# MODULE 1 — XML PARSER / FORMAT ADAPTER
 # ============================================================
 #
 # Input:
-#     JATS XML
+#     JATS XML / BioC XML / Generic XML
 #
 # Process:
 #     解析 XML 結構
@@ -1423,16 +1423,46 @@ def detect_xml_format(
     # --------------------------------------------------------
     # JATS
     # --------------------------------------------------------
+    #
+    # 不再只看到 <article> 就直接判定為 JATS。
+    #
+    # 因為一般 XML 也可能使用 <article> 這個 tag。
+    # 只有同時具有 JATS 典型的：
+    #
+    #     <front>
+    #       <article-meta>
+    #
+    # 才判定為 JATS。
+    # --------------------------------------------------------
+
+    article_candidates = []
 
     if local_name(root) == "article":
 
-        return "JATS"
+        article_candidates.append(
+            root
+        )
 
-    if root.find(
-        ".//{*}article"
-    ) is not None:
+    article_candidates.extend(
+        root.findall(
+            ".//{*}article"
+        )
+    )
 
-        return "JATS"
+    for article in article_candidates:
+
+        front = article.find(
+            "./{*}front"
+        )
+
+        if (
+            front is not None
+            and front.find(
+                "./{*}article-meta"
+            ) is not None
+        ):
+
+            return "JATS"
 
     # --------------------------------------------------------
     # BioC
@@ -1456,11 +1486,20 @@ def detect_xml_format(
 
         return "BioC"
 
-    raise ValueError(
-        "Unsupported XML format. "
-        "This system currently supports JATS XML "
-        "and BioC XML."
-    )
+    # --------------------------------------------------------
+    # Generic XML fallback
+    # --------------------------------------------------------
+    #
+    # 只要 XML 本身是合法 XML，
+    # 但不是 JATS / BioC，
+    # 就交給 Generic XML Parser。
+    #
+    # 目的：
+    #     教授若臨時放入其他 XML schema，
+    #     系統仍可擷取可見文字並進行全文搜尋。
+    # --------------------------------------------------------
+
+    return "GenericXML"
 
 
 # ============================================================
@@ -2400,6 +2439,345 @@ def parse_bioc(
     return document
 
 
+
+# ============================================================
+# 19. Generic XML Fallback
+# ============================================================
+#
+# 用途：
+#
+#     合法 XML
+#     但不是 JATS / BioC
+#
+# 策略：
+#
+#     Generic XML
+#         ↓
+#     擷取所有可見文字
+#         ↓
+#     轉成與 JATS / BioC 相同的 Structured Document
+#         ↓
+#     M02 ~ M06 照常運作
+#
+# 注意：
+#
+# Generic XML 沒有標準的 PMCID / DOI / Abstract / Reference
+# 語意，因此不假裝理解未知 schema。
+#
+# 我們只保證：
+#
+#     「文字可以被擷取、建立索引、搜尋與定位」
+#
+# ============================================================
+
+
+def find_first_generic_title(
+    root
+):
+
+    title_names = {
+        "title",
+        "article-title",
+        "article_title",
+        "document-title",
+        "document_title",
+        "name",
+    }
+
+    for element in root.iter():
+
+        if (
+            local_name(element).lower()
+            in title_names
+        ):
+
+            text = normalize_inline_text(
+                " ".join(
+                    part
+                    for part in element.itertext()
+                    if part
+                )
+            )
+
+            if text:
+
+                return (
+                    element,
+                    text
+                )
+
+    return (
+        None,
+        ""
+    )
+
+
+def collect_generic_xml_text(
+    root,
+    excluded_element=None
+):
+
+    parts = []
+
+    def walk(
+        node
+    ):
+
+        # 若這個節點被當成 title，
+        # 不再把它重複塞進 body。
+        if node is excluded_element:
+
+            if node.tail:
+
+                parts.append(
+                    node.tail
+                )
+
+            return
+
+        if node.text:
+
+            parts.append(
+                node.text
+            )
+
+        for child in node:
+
+            walk(
+                child
+            )
+
+            if (
+                child is not excluded_element
+                and child.tail
+            ):
+
+                parts.append(
+                    child.tail
+                )
+
+    # root 本身沒有 parent，
+    # 所以另外處理，避免 tail 重複。
+    if root is excluded_element:
+
+        return ""
+
+    if root.text:
+
+        parts.append(
+            root.text
+        )
+
+    for child in root:
+
+        if child is excluded_element:
+
+            if child.tail:
+
+                parts.append(
+                    child.tail
+                )
+
+            continue
+
+        # 子樹內的 tail 由 walk() 處理；
+        # 這裡只走子節點本身。
+        if child.text:
+
+            parts.append(
+                child.text
+            )
+
+        for descendant in child:
+
+            # 這裡不用直接迭代 descendant，
+            # 交給下方 helper 會比較安全。
+            pass
+
+        # 改用一個小型遞迴，從 child 的 children 開始
+        def walk_children(
+            node
+        ):
+
+            for sub in node:
+
+                if sub is excluded_element:
+
+                    if sub.tail:
+
+                        parts.append(
+                            sub.tail
+                        )
+
+                    continue
+
+                if sub.text:
+
+                    parts.append(
+                        sub.text
+                    )
+
+                walk_children(
+                    sub
+                )
+
+                if sub.tail:
+
+                    parts.append(
+                        sub.tail
+                    )
+
+        walk_children(
+            child
+        )
+
+        if child.tail:
+
+            parts.append(
+                child.tail
+            )
+
+    return normalize_inline_text(
+        " ".join(parts)
+    )
+
+
+def parse_generic_xml(
+    xml_file
+):
+
+    tree = ET.parse(
+        xml_file
+    )
+
+    root = tree.getroot()
+
+    (
+        title_element,
+        title
+    ) = find_first_generic_title(
+        root
+    )
+
+    full_text = collect_generic_xml_text(
+        root,
+        excluded_element=title_element
+    )
+
+    # 如果沒有明確 <title> 類型欄位，
+    # 用檔名當 UI 顯示名稱。
+    if not title:
+
+        title = Path(
+            xml_file
+        ).stem
+
+    body_paragraphs = (
+        [full_text]
+        if full_text
+        else []
+    )
+
+    document = {
+
+        "filename":
+            Path(xml_file).name,
+
+        "source_format":
+            "GenericXML",
+
+        "article_type":
+            "generic_xml",
+
+        "pmcid":
+            "",
+
+        "pmid":
+            "",
+
+        "doi":
+            "",
+
+        "journal":
+            "",
+
+        "title":
+            title,
+
+        "authors":
+            [],
+
+        "affiliations":
+            [],
+
+        "keywords":
+            [],
+
+        "abstract_section_titles":
+            [],
+
+        "abstract_paragraphs":
+            [],
+
+        "abstract_paragraphs_clean":
+            [],
+
+        "abstract":
+            "",
+
+        "abstract_clean":
+            "",
+
+        "section_titles":
+            [],
+
+        "body_paragraphs":
+            body_paragraphs,
+
+        "body_paragraphs_clean":
+            body_paragraphs.copy(),
+
+        "body":
+            full_text,
+
+        "body_clean":
+            full_text,
+
+        "definitions":
+            [],
+
+        "figures":
+            [],
+
+        "tables":
+            [],
+
+        "acknowledgments":
+            [],
+
+        "references":
+            [],
+
+        "reported_word_count":
+            None,
+
+        "reported_figure_count":
+            None,
+
+        "reported_table_count":
+            None,
+
+        "reported_ref_count":
+            None,
+
+        "reported_page_count":
+            None
+    }
+
+    return document
+
+
+
 # ============================================================
 # 19. 對外統一入口
 # ============================================================
@@ -2435,6 +2813,12 @@ def parse_jats(
     if xml_format == "BioC":
 
         return parse_bioc(
+            xml_file
+        )
+
+    if xml_format == "GenericXML":
+
+        return parse_generic_xml(
             xml_file
         )
 

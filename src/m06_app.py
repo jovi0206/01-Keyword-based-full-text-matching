@@ -21,7 +21,8 @@ from m05_query_engine import search_query
 # → Open Article → All / Exact / Related
 # → Previous / Next Match → Position Details
 #
-# M01 ~ M05 are unchanged.
+# M01 ~ M05 interfaces are unchanged.
+# M06 isolates per-file failures during upload/build.
 # ============================================================
 
 st.set_page_config(
@@ -81,6 +82,11 @@ def build_uploaded_documents(uploaded_files):
     positioned_documents = []
     errors = []
 
+    # 防止兩個檔案最後得到同一個 document_id。
+    # 例如同一篇文章同時上傳 JATS / BioC，
+    # 或兩個 Generic XML 使用相同檔名。
+    accepted_document_ids = set()
+
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
 
@@ -94,6 +100,19 @@ def build_uploaded_documents(uploaded_files):
                 xml_path = file_folder / safe_name
                 xml_path.write_bytes(uploaded_file.getvalue())
 
+                # ------------------------------------------------
+                # 單檔錯誤隔離：
+                # 每一個 XML 都在自己的 try / except 中處理。
+                #
+                # 某一個檔案若：
+                # - XML 損壞
+                # - Parser 失敗
+                # - Text Processing 失敗
+                # - Position Mapping 失敗
+                #
+                # 只跳過該檔案，不影響其他正常檔案。
+                # ------------------------------------------------
+
                 # M01
                 document = parse_jats(xml_path)
 
@@ -102,6 +121,16 @@ def build_uploaded_documents(uploaded_files):
 
                 # M03
                 positioned = map_document_positions(processed)
+
+                document_id = get_document_id(positioned)
+
+                if document_id in accepted_document_ids:
+                    raise ValueError(
+                        "Duplicate document ID detected: "
+                        f"{document_id}"
+                    )
+
+                accepted_document_ids.add(document_id)
 
                 processed_documents.append(processed)
                 positioned_documents.append(positioned)
@@ -115,6 +144,8 @@ def build_uploaded_documents(uploaded_files):
                 )
 
     # M04
+    #
+    # 只有成功通過 M01 ~ M03 的文件才會進入索引。
     index_data = (
         build_index(positioned_documents)
         if positioned_documents
@@ -141,6 +172,7 @@ def document_stats_rows(processed_documents):
             {
                 "PMCID": document["pmcid"],
                 "File": document["filename"],
+                "Format": document.get("source_format", "JATS"),
                 "Characters": document["character_count"],
                 # M02 自行計算的字數：用來展示本系統的統計結果。
                 "Computed Words": document["computed_word_count"],
@@ -1143,7 +1175,7 @@ with st.sidebar:
     st.header("Keyword-based Full-Text Matching")
 
     st.caption(
-        "Educational prototype for PMC JATS and BioC XML"
+        "Educational prototype for JATS, BioC, and Generic XML"
     )
 
     st.divider()
@@ -1208,7 +1240,7 @@ st.caption(
 st.header("1. Load Documents")
 
 uploaded_files = st.file_uploader(
-    "Upload one or more PMC JATS / BioC XML files",
+    "Upload one or more XML files (JATS / BioC / Generic XML)",
     type=["xml"],
     accept_multiple_files=True,
 )
@@ -1292,8 +1324,13 @@ if build_button:
 # ============================================================
 
 if st.session_state["build_errors"]:
+    skipped_count = len(
+        st.session_state["build_errors"]
+    )
+
     st.warning(
-        "Some XML files could not be processed."
+        f"{skipped_count} XML file(s) could not be processed. "
+        "Other valid files were still indexed."
     )
 
     for error in st.session_state[
@@ -1311,8 +1348,10 @@ if st.session_state["build_errors"]:
 
 if not st.session_state["index_ready"]:
     st.info(
-        "Upload JATS / BioCXML files and click "
-        "'Analyze / Build Index' to begin."
+        "Upload XML files and click "
+        "'Analyze / Build Index' to begin. "
+        "JATS and BioC receive structured parsing; "
+        "other valid XML uses Generic XML fallback."
     )
     st.stop()
 
@@ -1355,10 +1394,25 @@ if (
     )
 
 
-st.success(
-    f"Index Ready — "
-    f"{len(processed_documents)} documents loaded"
+loaded_count = len(
+    processed_documents
 )
+
+skipped_count = len(
+    st.session_state["build_errors"]
+)
+
+if skipped_count:
+    st.success(
+        f"Index Ready — "
+        f"{loaded_count} documents loaded · "
+        f"{skipped_count} skipped"
+    )
+else:
+    st.success(
+        f"Index Ready — "
+        f"{loaded_count} documents loaded"
+    )
 
 
 metric1, metric2, metric3 = st.columns(3)
