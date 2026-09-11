@@ -142,8 +142,14 @@ def document_stats_rows(processed_documents):
                 "PMCID": document["pmcid"],
                 "File": document["filename"],
                 "Characters": document["character_count"],
-                "Words": document["word_count"],
-                "Word Source": document["word_count_source"],
+                # M02 自行計算的字數：用來展示本系統的統計結果。
+                "Computed Words": document["computed_word_count"],
+                # 使用文字欄位，讓缺少 JATS 字數時可顯示破折號。
+                "JATS Reported Words": (
+                    str(document["jats_reported_word_count"])
+                    if document.get("jats_reported_word_count") is not None
+                    else "—"
+                ),
                 "Sentences": document["sentence_count"],
             }
         )
@@ -1537,11 +1543,13 @@ with st.expander(
     )
 
     st.caption(
-        "Word Count Strategy: use the JATS-reported "
-        "word-count when available; otherwise use the "
-        "tokenizer-based computed count. "
-        "References remain searchable but are excluded "
-        "from article statistics."
+        "Computed Words: calculated by this system using its tokenizer. "
+        "JATS Reported Words: provided by the XML, or — when unavailable. "
+        "These counts may differ because counting rules and coverage differ. "
+        "Article statistics cover the title, abstract, definitions, body, "
+        "figure captions, table captions/text, and acknowledgments. "
+        "Headings, definitions, and table text are excluded from sentence counts. "
+        "References remain searchable but are excluded from article statistics."
     )
 
 
