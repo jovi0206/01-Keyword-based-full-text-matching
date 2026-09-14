@@ -66,13 +66,13 @@ st.markdown(
         --kfm-soft-2: #EEF2EC;
 
         /* ---------- Exact 強調色 ---------- */
-        --kfm-exact-bg: #EEF2EC;
-        --kfm-exact-border: #2E4031;
+        --kfm-exact-bg: #FFFFFF;
+        --kfm-exact-border: #8FBC8F;
         --kfm-exact-value: #1C2321;
 
         /* ---------- 01 Index KPI：Documents / Indexed Words / Unique Terms ---------- */
         --kfm-index-max-width: 580px;
-        --kfm-index-min-height: 580px;
+        --kfm-index-min-height: 300px;
         --kfm-index-padding-y: 26px;
         --kfm-index-padding-x: 22px;
         --kfm-index-radius: 22px;
@@ -82,7 +82,7 @@ st.markdown(
 
         /* ---------- 02 Search Summary：四張 KPI ---------- */
         --kfm-summary-max-width: 400px;
-        --kfm-summary-min-height: 400px;
+        --kfm-summary-min-height: 320px;
         --kfm-summary-padding-y: 24px;
         --kfm-summary-padding-x: 18px;
         --kfm-summary-radius: 22px;
@@ -553,6 +553,229 @@ st.markdown(
         background: #FFFFFF;
         border-color: var(--kfm-border);
         border-radius: 9px;
+    }
+
+
+    /* ========================================================
+       11. DOCUMENT STATISTICS TABLE
+       Pure HTML table: avoids Streamlit dataframe / PyArrow dependency
+       ======================================================== */
+    .kfm-stats-table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        margin: 4px 0 12px 0;
+    }
+
+    .kfm-stats-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        background: var(--kfm-card);
+        color: var(--kfm-ink);
+        font-size: 0.92rem;
+        border: 1px solid var(--kfm-border);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+
+    .kfm-stats-table th {
+        background: var(--kfm-soft);
+        color: var(--kfm-forest);
+        font-weight: 800;
+        text-align: left;
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--kfm-border);
+        white-space: nowrap;
+    }
+
+    .kfm-stats-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--kfm-border);
+        vertical-align: top;
+    }
+
+    .kfm-stats-table tbody tr:last-child td {
+        border-bottom: 0;
+    }
+
+    .kfm-stats-table tbody tr:nth-child(even) {
+        background: var(--kfm-soft-2);
+    }
+
+
+    /* ========================================================
+       12. ARTICLE RESULT NAVIGATION
+       Fixed beside the article so controls remain available
+       while the user scrolls through a long document.
+       ======================================================== */
+
+    .st-key-prev_result_side,
+    .st-key-next_result_side,
+    .st-key-back_to_results_side {
+        position: fixed;
+        z-index: 9998;
+        width: 170px;
+    }
+
+    .st-key-prev_result_side {
+        left: 28px;
+        top: 48%;
+        transform: translateY(-50%);
+    }
+
+    .st-key-next_result_side {
+        right: 28px;
+        top: 48%;
+        transform: translateY(-50%);
+    }
+
+    .st-key-back_to_results_side {
+        right: 28px;
+        top: calc(48% + 116px);
+        transform: translateY(-50%);
+    }
+
+    .st-key-prev_result_side button,
+    .st-key-next_result_side button,
+    .st-key-back_to_results_side button {
+        width: 170px !important;
+        min-height: 46px !important;
+        border-radius: 9px !important;
+        font-weight: 800 !important;
+        box-shadow: 0 7px 18px rgba(28, 35, 33, 0.14);
+    }
+
+    .st-key-prev_result_side button,
+    .st-key-next_result_side button {
+        background: #FFFFFF !important;
+        color: var(--kfm-forest) !important;
+        border: 1px solid var(--kfm-border) !important;
+    }
+
+    .st-key-prev_result_side button:hover,
+    .st-key-next_result_side button:hover {
+        background: var(--kfm-soft) !important;
+        border-color: var(--kfm-moss) !important;
+    }
+
+    .st-key-back_to_results_side button {
+        background: var(--kfm-forest) !important;
+        color: #FFFFFF !important;
+        border: 1px solid var(--kfm-forest) !important;
+    }
+
+    .kfm-side-result-count-left,
+    .kfm-side-result-count-right {
+        position: fixed;
+        z-index: 9997;
+        width: 170px;
+        text-align: center;
+        color: var(--kfm-muted);
+        font-size: 0.92rem;
+        font-weight: 800;
+        pointer-events: none;
+    }
+
+    .kfm-side-result-count-left {
+        left: 28px;
+        top: calc(48% + 48px);
+    }
+
+    .kfm-side-result-count-right {
+        right: 28px;
+        top: calc(48% + 48px);
+    }
+
+    /* On narrower screens, keep controls away from article text. */
+    @media (max-width: 1350px) {
+        .st-key-prev_result_side,
+        .st-key-next_result_side,
+        .st-key-back_to_results_side,
+        .kfm-side-result-count-left,
+        .kfm-side-result-count-right {
+            width: 135px;
+        }
+
+        .st-key-prev_result_side button,
+        .st-key-next_result_side button,
+        .st-key-back_to_results_side button {
+            width: 135px !important;
+            font-size: 0.86rem !important;
+        }
+
+        .st-key-prev_result_side,
+        .kfm-side-result-count-left {
+            left: 10px;
+        }
+
+        .st-key-next_result_side,
+        .st-key-back_to_results_side,
+        .kfm-side-result-count-right {
+            right: 10px;
+        }
+    }
+
+
+    /* ========================================================
+       13. ARTICLE QUICK SEARCH
+       Simple Auto Search available directly from Article View.
+       ======================================================== */
+    .st-key-article_quick_search {
+        position: fixed;
+        left: 50%;
+        bottom: 18px;
+        transform: translateX(-50%);
+        z-index: 9999;
+        width: min(720px, 58vw);
+        background: rgba(244, 246, 240, 0.97);
+        border: 1px solid var(--kfm-border);
+        border-radius: 14px;
+        padding: 8px 10px 4px 10px;
+        box-shadow: 0 10px 28px rgba(28, 35, 33, 0.18);
+        backdrop-filter: blur(6px);
+    }
+
+    .st-key-article_quick_search [data-testid="stTextInput"] input {
+        min-height: 46px;
+        border-radius: 10px !important;
+        background: #FFFFFF !important;
+        color: var(--kfm-ink) !important;
+        font-size: 1rem !important;
+    }
+
+    .st-key-article_quick_search .stFormSubmitButton > button {
+        min-height: 46px !important;
+        border-radius: 10px !important;
+        background: var(--kfm-forest) !important;
+        border-color: var(--kfm-forest) !important;
+        color: #FFFFFF !important;
+        font-weight: 800 !important;
+    }
+
+    @media (max-width: 1350px) {
+        .st-key-article_quick_search {
+            width: min(620px, 56vw);
+        }
+    }
+
+
+    /* ========================================================
+       14. SEARCH RESULT NUMBER
+       PubMed-inspired result numbering, adapted to our visual style.
+       ======================================================== */
+    .kfm-result-number {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        background: var(--kfm-forest);
+        color: #FFFFFF;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.05rem;
+        font-weight: 900;
+        box-shadow: 0 5px 12px rgba(28, 35, 33, 0.12);
+        margin-top: 2px;
     }
 
     </style>
@@ -1490,7 +1713,7 @@ body {{
                 id="previous-button"
                 class="nav-button"
                 onclick="previousMatch()">
-                ◀ Previous
+                ◀ Previous Match
             </button>
 
             <div
@@ -1503,7 +1726,7 @@ body {{
                 id="next-button"
                 class="nav-button"
                 onclick="nextMatch()">
-                Next ▶
+                Next Match ▶
             </button>
 
             <button
@@ -1819,9 +2042,9 @@ with st.sidebar:
         """
 **Result display**
 
-Exact → deep blue  
+Exact → bold  
 Related → bold / dotted underline  
-Current match → moss green
+Current match → yellow highlight
         """
     )
 
@@ -2121,45 +2344,111 @@ if st.session_state["view_mode"] == "article":
         ]
     )
 
-    if st.button(
-        "← Back to Search Results"
-    ):
-        st.session_state[
-            "view_mode"
-        ] = "search"
+    # --------------------------------------------------------
+    # Result navigation:
+    # Use the same order as Search Results.
+    # First result shows only Next Result.
+    # Last result shows only Previous Result.
+    # --------------------------------------------------------
 
-        st.session_state[
-            "selected_document_id"
-        ] = None
+    ordered_document_ids = [
+        document_id
+        for document_id, _items
+        in sort_document_results(
+            grouped
+        )
+    ]
 
-        st.rerun()
-
-    # Floating return button:
-    # always available even when the user is deep inside the article.
-    st.markdown(
-        """
-        <style>
-        .st-key-floating_back_to_search {
-            position: fixed;
-            right: 28px;
-            bottom: 28px;
-            z-index: 9999;
-        }
-
-        .st-key-floating_back_to_search button {
-            border-radius: 999px;
-            padding: 0.65rem 1.1rem;
-            font-weight: 700;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    current_result_index = (
+        ordered_document_ids.index(
+            selected_document_id
+        )
     )
+
+    previous_document_id = (
+        ordered_document_ids[
+            current_result_index - 1
+        ]
+        if current_result_index > 0
+        else None
+    )
+
+    next_document_id = (
+        ordered_document_ids[
+            current_result_index + 1
+        ]
+        if current_result_index
+        < len(ordered_document_ids) - 1
+        else None
+    )
+
+    # --------------------------------------------------------
+    # Fixed side navigation:
+    # - Previous Result stays on the left.
+    # - Next Result stays on the right.
+    # - Search Results sits directly below Next Result.
+    #
+    # Because these controls are fixed, the user does not need
+    # to scroll back to the top of a long article.
+    # --------------------------------------------------------
+
+    if previous_document_id is not None:
+        if st.button(
+            "← Prev Result",
+            key="prev_result_side",
+        ):
+            st.session_state[
+                "selected_document_id"
+            ] = previous_document_id
+
+            st.rerun()
+
+        st.markdown(
+            (
+                '<div class="kfm-side-result-count-left">'
+                f'Result {current_result_index + 1} '
+                f'of {len(ordered_document_ids)}'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
+
+    if next_document_id is not None:
+        if st.button(
+            "Next Result →",
+            key="next_result_side",
+        ):
+            st.session_state[
+                "selected_document_id"
+            ] = next_document_id
+
+            st.rerun()
+
+        st.markdown(
+            (
+                '<div class="kfm-side-result-count-right">'
+                f'Result {current_result_index + 1} '
+                f'of {len(ordered_document_ids)}'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
+    else:
+        # Last result: keep the result counter on the right
+        # even though there is no Next Result button.
+        st.markdown(
+            (
+                '<div class="kfm-side-result-count-right">'
+                f'Result {current_result_index + 1} '
+                f'of {len(ordered_document_ids)}'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
 
     if st.button(
         "← Search Results",
-        key="floating_back_to_search",
+        key="back_to_results_side",
         type="primary",
     ):
         st.session_state[
@@ -2192,10 +2481,66 @@ if st.session_state["view_mode"] == "article":
         f"**Related:** {related_count}"
     )
 
-    st.caption(
-        "Use Previous / Next to move through matches. "
-        "Current match = moss green."
-    )
+    # --------------------------------------------------------
+    # Quick Search:
+    # Run the next query directly from Article View.
+    # This intentionally uses Auto mode so the live demo needs
+    # only one input box and one Search button.
+    # --------------------------------------------------------
+
+    with st.form(
+        "article_quick_search",
+        clear_on_submit=True,
+    ):
+        quick_query_col, quick_button_col = st.columns(
+            [6.6, 1.4]
+        )
+
+        with quick_query_col:
+            quick_query = st.text_input(
+                "Quick Search",
+                placeholder="Search another word, phrase, or sentence...",
+                label_visibility="collapsed",
+            )
+
+        with quick_button_col:
+            quick_search_button = st.form_submit_button(
+                "Search",
+                type="primary",
+                use_container_width=True,
+            )
+
+    if quick_search_button:
+        if not quick_query.strip():
+            st.warning(
+                "Please enter a query."
+            )
+
+        else:
+            with st.spinner(
+                "Searching index..."
+            ):
+                quick_result = search_query(
+                    index_data=index_data,
+                    positioned_documents=positioned_documents,
+                    query=quick_query,
+                    query_type="auto",
+                )
+
+            st.session_state[
+                "search_result"
+            ] = quick_result
+
+            st.session_state[
+                "view_mode"
+            ] = "search"
+
+            st.session_state[
+                "selected_document_id"
+            ] = None
+
+            st.rerun()
+
 
     viewer_html = build_article_viewer_html(
         document=selected_document,
@@ -2220,22 +2565,61 @@ with st.expander(
     "Document Statistics",
     expanded=False,
 ):
-    st.dataframe(
-        document_stats_rows(
-            processed_documents
-        ),
-        width="stretch",
-        hide_index=True,
+    # --------------------------------------------------------
+    # Pure HTML table instead of st.dataframe():
+    #
+    # 1. Avoids PyArrow DLL loading on managed Windows PCs.
+    # 2. Avoids Markdown rendering <tr>/<td> as code by building
+    #    the HTML without leading indentation.
+    # --------------------------------------------------------
+
+    stats_rows = document_stats_rows(
+        processed_documents
+    )
+
+    table_rows = []
+
+    for row in stats_rows:
+        table_rows.append(
+            "<tr>"
+            f'<td>{html.escape(str(row["PMCID"] or "—"))}</td>'
+            f'<td>{html.escape(str(row["File"]))}</td>'
+            f'<td>{html.escape(str(row["Format"]))}</td>'
+            f'<td>{html.escape(str(row["Characters"]))}</td>'
+            f'<td>{html.escape(str(row["Computed Words"]))}</td>'
+            f'<td>{html.escape(str(row["JATS Reported Words"]))}</td>'
+            f'<td>{html.escape(str(row["Sentences"]))}</td>'
+            "</tr>"
+        )
+
+    stats_table_html = (
+        '<div class="kfm-stats-table-wrap">'
+        '<table class="kfm-stats-table">'
+        '<thead><tr>'
+        '<th>PMCID</th>'
+        '<th>XML File</th>'
+        '<th>XML Format</th>'
+        '<th>Characters</th>'
+        '<th>Computed Words</th>'
+        '<th>Reported Words</th>'
+        '<th>Sentences</th>'
+        '</tr></thead>'
+        '<tbody>'
+        + "".join(table_rows)
+        + '</tbody></table></div>'
+    )
+
+    st.markdown(
+        stats_table_html,
+        unsafe_allow_html=True,
     )
 
     st.caption(
-        "Computed Words: calculated by this system using its tokenizer. "
-        "JATS Reported Words: provided by the XML, or — when unavailable. "
-        "These counts may differ because counting rules and coverage differ. "
-        "Article statistics cover the title, abstract, definitions, body, "
-        "figure captions, table captions/text, and acknowledgments. "
-        "Headings, definitions, and table text are excluded from sentence counts. "
-        "References remain searchable but are excluded from article statistics."
+        "Computed Words are calculated by this system using its tokenizer. "
+        "Reported Words come from the source XML when available. "
+        "Counts can differ because the source and this system may use different "
+        "counting rules and coverage. References remain searchable but are "
+        "excluded from article statistics."
     )
 
 
@@ -2456,8 +2840,11 @@ document_lookup = (
 )
 
 
-for document_id, items in sort_document_results(
-    grouped
+for result_number, (document_id, items) in enumerate(
+    sort_document_results(
+        grouped
+    ),
+    start=1,
 ):
     document = document_lookup[
         document_id
@@ -2476,82 +2863,97 @@ for document_id, items in sort_document_results(
     with st.container(
         border=True
     ):
-        st.subheader(
-            document["title"]
+        number_col, content_col = st.columns(
+            [0.42, 9.58]
         )
 
-        source_format = document.get(
-            "source_format",
-            "Unknown",
-        )
-
-        st.markdown(
-            (
-                '<div class="kfm-meta-row">'
-                f'<span class="kfm-chip">{html.escape(str(document_id))}</span>'
-                f'<span class="kfm-chip format">{html.escape(str(source_format))}</span>'
-                '</div>'
-            ),
-            unsafe_allow_html=True,
-        )
-
-        result_kpi1, result_kpi2, result_kpi3 = (
-            st.columns(3)
-        )
-
-        with result_kpi1:
-            render_result_kpi(
-                "Exact Matches",
-                exact_count,
-                "exact",
-            )
-
-        with result_kpi2:
-            render_result_kpi(
-                "Related Matches",
-                related_count,
-            )
-
-        with result_kpi3:
-            render_result_kpi(
-                "Total Matches",
-                len(items),
-            )
-
-        if snippet_item:
-            snippet_html = highlight_snippet(
-                context=snippet_item["context"],
-                matched_text=snippet_item[
-                    "matched_text"
-                ],
-                match_type=snippet_item[
-                    "match_type"
-                ],
-            )
-
+        with number_col:
             st.markdown(
                 (
-                    '<div class="kfm-snippet">'
-                    f"{snippet_html}"
-                    "</div>"
+                    '<div class="kfm-result-number">'
+                    f'{result_number}'
+                    '</div>'
                 ),
                 unsafe_allow_html=True,
             )
 
-        if st.button(
-            "Open Article",
-            key=(
-                "open_article_"
-                + document_id
-            ),
-            type="primary",
-        ):
-            st.session_state[
-                "selected_document_id"
-            ] = document_id
+        with content_col:
+            st.subheader(
+                document["title"]
+            )
 
-            st.session_state[
-                "view_mode"
-            ] = "article"
+            source_format = document.get(
+                "source_format",
+                "Unknown",
+            )
 
-            st.rerun()
+            st.markdown(
+                (
+                    '<div class="kfm-meta-row">'
+                    f'<span class="kfm-chip">{html.escape(str(document_id))}</span>'
+                    f'<span class="kfm-chip format">{html.escape(str(source_format))}</span>'
+                    '</div>'
+                ),
+                unsafe_allow_html=True,
+            )
+
+            result_kpi1, result_kpi2, result_kpi3 = (
+                st.columns(3)
+            )
+
+            with result_kpi1:
+                render_result_kpi(
+                    "Exact Matches",
+                    exact_count,
+                    "exact",
+                )
+
+            with result_kpi2:
+                render_result_kpi(
+                    "Related Matches",
+                    related_count,
+                )
+
+            with result_kpi3:
+                render_result_kpi(
+                    "Total Matches",
+                    len(items),
+                )
+
+            if snippet_item:
+                snippet_html = highlight_snippet(
+                    context=snippet_item["context"],
+                    matched_text=snippet_item[
+                        "matched_text"
+                    ],
+                    match_type=snippet_item[
+                        "match_type"
+                    ],
+                )
+
+                st.markdown(
+                    (
+                        '<div class="kfm-snippet">'
+                        f"{snippet_html}"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+            if st.button(
+                "Open Article",
+                key=(
+                    "open_article_"
+                    + document_id
+                ),
+                type="primary",
+            ):
+                st.session_state[
+                    "selected_document_id"
+                ] = document_id
+
+                st.session_state[
+                    "view_mode"
+                ] = "article"
+
+                st.rerun()
