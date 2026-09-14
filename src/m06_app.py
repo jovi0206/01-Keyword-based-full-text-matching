@@ -808,7 +808,7 @@ def render_hero():
     st.markdown(
         """
         <div class="kfm-hero">
-            <div class="kfm-hero-kicker">Biomedical Information Retrieval</div>
+            <div class="kfm-hero-kicker">Artificial Intelligence Information Retrieval</div>
             <div class="kfm-hero-title">Keyword-based Full-Text Matching</div>
             <div class="kfm-flow">
                 <span class="kfm-flow-step">Upload XML</span>
@@ -2092,7 +2092,7 @@ render_hero()
 render_section_header(
     "01",
     "Load Documents",
-    "Upload biomedical XML files, then build the positional index.",
+    "Upload XML files, then build the positional index.",
 )
 
 st.caption(
