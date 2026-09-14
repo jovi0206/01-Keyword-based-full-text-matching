@@ -31,6 +31,535 @@ st.set_page_config(
     layout="wide",
 )
 
+
+# ============================================================
+# VISUAL SYSTEM — NATURAL GREEN LIGHT UI
+#
+# UI 微調方式：
+# 先修改下方 CSS 的「UI TUNING ZONE」即可。
+# 一般不需要再往下找 class；寬度、高度、字體與主要色彩都集中在 :root。
+# ============================================================
+# Design goals:
+# 1. High readability on notebook + classroom projector
+# 2. Linen-white background with forest-green visual hierarchy
+# 3. Results-first visual structure: Retrieval → Matching → Verification
+# 4. No decorative charts; use clear KPI cards and progressive disclosure
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
+    /* ========================================================
+       UI TUNING ZONE — 常用微調集中在這裡
+       ======================================================== */
+    :root {
+        /* ---------- 主色盤 ---------- */
+        --kfm-forest: #2E4031;
+        --kfm-moss: #8FBC8F;
+        --kfm-linen: #F4F6F0;
+        --kfm-ink: #1C2321;
+        --kfm-card: #FFFFFF;
+        --kfm-muted: #5F6D63;
+        --kfm-border: #D7E0D4;
+        --kfm-soft: #E8EEE6;
+        --kfm-soft-2: #EEF2EC;
+
+        /* ---------- Exact 強調色 ---------- */
+        --kfm-exact-bg: #EEF2EC;
+        --kfm-exact-border: #2E4031;
+        --kfm-exact-value: #1C2321;
+
+        /* ---------- 01 Index KPI：Documents / Indexed Words / Unique Terms ---------- */
+        --kfm-index-max-width: 580px;
+        --kfm-index-min-height: 580px;
+        --kfm-index-padding-y: 26px;
+        --kfm-index-padding-x: 22px;
+        --kfm-index-radius: 22px;
+        --kfm-index-label-size: 2.02rem;
+        --kfm-index-value-size: 4.35rem;
+        --kfm-index-caption-size: 0.92rem;
+
+        /* ---------- 02 Search Summary：四張 KPI ---------- */
+        --kfm-summary-max-width: 400px;
+        --kfm-summary-min-height: 400px;
+        --kfm-summary-padding-y: 24px;
+        --kfm-summary-padding-x: 18px;
+        --kfm-summary-radius: 22px;
+        --kfm-summary-label-size: 2.02rem;
+        --kfm-summary-value-size: 3.55rem;
+
+        /* ---------- 每篇 Search Result：Exact / Related / Total ---------- */
+        --kfm-result-min-height: 104px;
+        --kfm-result-padding-y: 14px;
+        --kfm-result-padding-x: 16px;
+        --kfm-result-radius: 15px;
+        --kfm-result-label-size: 0.76rem;
+        --kfm-result-value-size: 2rem;
+
+        /* ---------- Search Bar ---------- */
+        --kfm-search-height: 52px;
+        --kfm-search-font-size: 1.12rem;
+        --kfm-search-button-font-size: 1.05rem;
+    }
+
+
+    /* ========================================================
+       0. GLOBAL PAGE
+       ======================================================== */
+    .stApp {
+        background: var(--kfm-linen);
+        color: var(--kfm-ink);
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(244, 246, 240, 0.94);
+    }
+
+    [data-testid="stSidebar"] {
+        background: var(--kfm-soft-2);
+        border-right: 1px solid var(--kfm-border);
+    }
+
+
+    /* ========================================================
+       1. HERO — Keyword-based Full-Text Matching
+       ======================================================== */
+    .kfm-hero {
+        background: linear-gradient(
+            105deg,
+            #1C2321 0%,
+            #2E4031 68%,
+            #49644D 100%
+        );
+        color: white;
+        border-radius: 16px;
+        padding: 22px 28px 20px 28px;
+        margin: 4px 0 28px 0;
+        box-shadow: 0 8px 22px rgba(28, 35, 33, 0.13);
+    }
+
+    .kfm-hero-kicker {
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+        opacity: 0.84;
+        margin-bottom: 5px;
+    }
+
+    .kfm-hero-title {
+        font-size: clamp(2rem, 3vw, 3rem);
+        line-height: 1.08;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        margin-bottom: 13px;
+    }
+
+    .kfm-flow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        align-items: center;
+        font-size: 0.92rem;
+        opacity: 0.96;
+    }
+
+    .kfm-flow-step {
+        background: rgba(255,255,255,0.12);
+        border: 1px solid rgba(255,255,255,0.24);
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-weight: 600;
+    }
+
+    .kfm-flow-arrow {
+        opacity: 0.72;
+        font-weight: 700;
+    }
+
+
+    /* ========================================================
+       2. SECTION HEADER — 01 Load Documents / 02 Search
+       ======================================================== */
+    .kfm-section {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin: 24px 0 12px 0;
+    }
+
+    .kfm-section-number {
+        flex: 0 0 auto;
+        background: var(--kfm-ink);
+        color: white;
+        border-radius: 9px;
+        min-width: 42px;
+        height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        font-weight: 800;
+    }
+
+    .kfm-section-title {
+        color: var(--kfm-ink);
+        font-size: 1.65rem;
+        line-height: 1.12;
+        font-weight: 800;
+        margin: 0;
+    }
+
+    .kfm-section-subtitle {
+        color: var(--kfm-muted);
+        font-size: 0.93rem;
+        margin-top: 4px;
+        line-height: 1.45;
+    }
+
+    .kfm-subheading {
+        width: 100%;
+        background: var(--kfm-forest);
+        color: #FFFFFF;
+        border-radius: 14px;
+        padding: 14px 20px;
+        margin: 28px 0 16px 0;
+        font-size: 1.75rem;
+        line-height: 1.15;
+        font-weight: 850;
+        box-shadow: 0 5px 14px rgba(46, 64, 49, 0.10);
+    }
+
+
+    /* ========================================================
+       3. LOAD DOCUMENTS — File Uploader
+       ======================================================== */
+    /*
+       保留 Streamlit 原生 uploader 行為：
+       - 顯示已選檔案
+       - 可用 × 刪除單一檔案
+       - 不另外覆寫 uploader 內部 layout
+    */
+
+
+    /* ========================================================
+       4. BUTTONS — Analyze / Search / Open Article
+       ======================================================== */
+    .stButton > button,
+    .stFormSubmitButton > button {
+        border-radius: 9px !important;
+        font-weight: 700 !important;
+        min-height: 2.75rem;
+    }
+
+    button[kind="primary"] {
+        background: var(--kfm-forest) !important;
+        border-color: var(--kfm-forest) !important;
+        color: white !important;
+    }
+
+    button[kind="primary"]:hover {
+        background: var(--kfm-ink) !important;
+        border-color: var(--kfm-ink) !important;
+    }
+
+
+    /* ========================================================
+       5. BUILD STATUS — Index Ready
+       ======================================================== */
+    .kfm-status {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        background: #EEF4EC;
+        border: 1px solid #C8D9C4;
+        border-left: 5px solid var(--kfm-forest);
+        border-radius: 10px;
+        padding: 11px 15px;
+        margin: 12px 0 14px 0;
+    }
+
+    .kfm-status-title {
+        color: var(--kfm-forest);
+        font-size: 1.1rem;
+        font-weight: 850;
+    }
+
+    .kfm-status-meta {
+        color: var(--kfm-muted);
+        font-size: 1rem;
+        font-weight: 700;
+    }
+
+
+    /* ========================================================
+       6. INDEX KPI
+       Documents / Indexed Words / Unique Terms
+       ======================================================== */
+    .kfm-index-card {
+        background: var(--kfm-card);
+        border: 1px solid var(--kfm-border);
+        border-top: 7px solid var(--kfm-moss);
+        border-radius: var(--kfm-index-radius);
+        box-shadow: 0 10px 24px rgba(28, 35, 33, 0.07);
+        margin: 6px auto 12px auto;
+
+        max-width: var(--kfm-index-max-width);
+        min-height: var(--kfm-index-min-height);
+        padding:
+            var(--kfm-index-padding-y)
+            var(--kfm-index-padding-x);
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .kfm-index-card.primary {
+        border-top-color: var(--kfm-forest);
+    }
+
+    .kfm-card-label {
+        color: var(--kfm-muted);
+        font-size: var(--kfm-index-label-size);
+        font-weight: 800;
+        letter-spacing: 0.015em;
+        margin-bottom: 14px;
+    }
+
+    .kfm-card-value {
+        color: var(--kfm-forest);
+        font-size: var(--kfm-index-value-size);
+        line-height: 1;
+        font-weight: 850;
+    }
+
+    .kfm-card-caption {
+        color: var(--kfm-muted);
+        font-size: var(--kfm-index-caption-size);
+        margin-top: 16px;
+        line-height: 1.35;
+    }
+
+
+    /* ========================================================
+       7. SEARCH BAR
+       ======================================================== */
+    div[data-testid="stForm"] {
+        background: var(--kfm-moss);
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px 4px 14px;
+        box-shadow: 0 8px 20px rgba(46, 64, 49, 0.16);
+    }
+
+    div[data-testid="stForm"] [data-testid="stTextInput"] input {
+        min-height: var(--kfm-search-height);
+        border-radius: 999px !important;
+        border: 0 !important;
+        background: var(--kfm-linen) !important;
+        color: var(--kfm-ink) !important;
+        font-size: var(--kfm-search-font-size) !important;
+        padding-left: 20px !important;
+    }
+
+    div[data-testid="stForm"] [data-testid="stSelectbox"] > div > div {
+        min-height: var(--kfm-search-height);
+        border-radius: 999px !important;
+        border: 0 !important;
+        background: #FFFFFF !important;
+        color: var(--kfm-ink) !important;
+    }
+
+    div[data-testid="stForm"] .stFormSubmitButton > button {
+        min-height: var(--kfm-search-height) !important;
+        border-radius: 999px !important;
+        font-size: var(--kfm-search-button-font-size) !important;
+        box-shadow: none !important;
+    }
+
+    .kfm-search-help {
+        color: var(--kfm-muted);
+        font-size: 0.92rem;
+        margin: 8px 4px 2px 6px;
+    }
+
+
+    /* ========================================================
+       8. SEARCH SUMMARY
+       Query + Retrieved / Exact / Related / Total
+       ======================================================== */
+    .kfm-query-line {
+        color: var(--kfm-muted);
+        font-size: 1.08rem;
+        margin: 0.2rem 0 1rem 0;
+    }
+
+    .kfm-query-line strong,
+    .kfm-query-value {
+        color: var(--kfm-ink);
+        font-weight: 800;
+    }
+
+    .kfm-summary-card {
+        background: var(--kfm-card);
+        border: 1px solid var(--kfm-border);
+        border-top: 7px solid var(--kfm-moss);
+        border-radius: var(--kfm-summary-radius);
+        box-shadow: 0 10px 24px rgba(28, 35, 33, 0.07);
+        margin: 6px auto 12px auto;
+
+        max-width: var(--kfm-summary-max-width);
+        min-height: var(--kfm-summary-min-height);
+        padding:
+            var(--kfm-summary-padding-y)
+            var(--kfm-summary-padding-x);
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .kfm-summary-card.primary {
+        border-top-color: var(--kfm-forest);
+    }
+
+    .kfm-summary-card.exact {
+        border-top-color: var(--kfm-exact-border);
+        background: var(--kfm-exact-bg);
+    }
+
+    .kfm-summary-label {
+        color: var(--kfm-muted);
+        font-size: var(--kfm-summary-label-size);
+        font-weight: 800;
+        letter-spacing: 0.015em;
+        margin-bottom: 14px;
+    }
+
+    .kfm-summary-value {
+        color: var(--kfm-forest);
+        font-size: var(--kfm-summary-value-size);
+        line-height: 1;
+        font-weight: 850;
+    }
+
+    .kfm-summary-card.exact .kfm-summary-value {
+        color: var(--kfm-exact-value);
+    }
+
+
+    /* ========================================================
+       9. SEARCH RESULT CARD
+       每篇文章內：Exact / Related / Total
+       ======================================================== */
+    .kfm-result-kpi {
+        background: #FFFFFF;
+        border: 1px solid var(--kfm-border);
+        border-top: 5px solid var(--kfm-moss);
+        border-radius: var(--kfm-result-radius);
+
+        min-height: var(--kfm-result-min-height);
+        padding:
+            var(--kfm-result-padding-y)
+            var(--kfm-result-padding-x)
+            12px
+            var(--kfm-result-padding-x);
+
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        box-shadow: 0 5px 14px rgba(28, 35, 33, 0.05);
+    }
+
+    .kfm-result-kpi.exact {
+        background: var(--kfm-exact-bg);
+        border-top-color: var(--kfm-exact-border);
+    }
+
+    .kfm-result-label {
+        color: var(--kfm-muted);
+        font-size: var(--kfm-result-label-size);
+        font-weight: 800;
+        letter-spacing: 0.025em;
+        margin-bottom: 4px;
+    }
+
+    .kfm-result-value {
+        color: var(--kfm-ink);
+        font-size: var(--kfm-result-value-size);
+        line-height: 1.02;
+        font-weight: 850;
+    }
+
+    .kfm-result-kpi.exact .kfm-result-value {
+        color: var(--kfm-exact-value);
+    }
+
+    .kfm-meta-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin: -2px 0 10px 0;
+    }
+
+    .kfm-chip {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        background: var(--kfm-soft-2);
+        border: 1px solid var(--kfm-border);
+        color: var(--kfm-muted);
+        padding: 3px 9px;
+        font-size: 0.76rem;
+        font-weight: 700;
+    }
+
+    .kfm-chip.format {
+        background: #DDEBDD;
+        border-color: #C8D9C4;
+        color: var(--kfm-ink);
+    }
+
+    .kfm-snippet {
+        line-height: 1.68;
+        font-size: 1rem;
+        margin: 6px 0 11px 0;
+        color: var(--kfm-ink);
+    }
+
+    .kfm-snippet-exact {
+        color: var(--kfm-ink);
+        background: var(--kfm-soft);
+        border-radius: 3px;
+        padding: 0 2px;
+        font-weight: 850;
+    }
+
+
+    /* ========================================================
+       10. EXPANDERS
+       Search Details / Document Statistics / Processing Details
+       ======================================================== */
+    [data-testid="stExpander"] {
+        background: #FFFFFF;
+        border-color: var(--kfm-border);
+        border-radius: 9px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 DEFAULT_SESSION_VALUES = {
     "index_ready": False,
     "processed_documents": [],
@@ -51,6 +580,112 @@ for key, value in DEFAULT_SESSION_VALUES.items():
 # ============================================================
 # BASIC HELPERS
 # ============================================================
+
+def render_hero():
+    st.markdown(
+        """
+        <div class="kfm-hero">
+            <div class="kfm-hero-kicker">Biomedical Information Retrieval</div>
+            <div class="kfm-hero-title">Keyword-based Full-Text Matching</div>
+            <div class="kfm-flow">
+                <span class="kfm-flow-step">Upload XML</span>
+                <span class="kfm-flow-arrow">→</span>
+                <span class="kfm-flow-step">Build Index</span>
+                <span class="kfm-flow-arrow">→</span>
+                <span class="kfm-flow-step">Search</span>
+                <span class="kfm-flow-arrow">→</span>
+                <span class="kfm-flow-step">Open Article</span>
+                <span class="kfm-flow-arrow">→</span>
+                <span class="kfm-flow-step">Locate Match</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_section_header(number, title, subtitle):
+    st.markdown(
+        f"""
+        <div class="kfm-section">
+            <div class="kfm-section-number">{html.escape(str(number))}</div>
+            <div>
+                <div class="kfm-section-title">{html.escape(title)}</div>
+                <div class="kfm-section-subtitle">{html.escape(subtitle)}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_subheading(title):
+    st.markdown(
+        f'<div class="kfm-subheading">{html.escape(str(title))}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_index_kpi(label, value, caption="", card_class=""):
+    safe_label = html.escape(str(label))
+    safe_value = html.escape(str(value))
+    safe_caption = html.escape(str(caption))
+
+    st.markdown(
+        f'<div class="kfm-index-card {card_class}">'
+        f'<div class="kfm-card-label">{safe_label}</div>'
+        f'<div class="kfm-card-value">{safe_value}</div>'
+        f'<div class="kfm-card-caption">{safe_caption}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_kpi_card(label, value, card_class=""):
+    safe_label = html.escape(str(label))
+    safe_value = html.escape(str(value))
+
+    st.markdown(
+        f'<div class="kfm-summary-card {card_class}">'
+        f'<div class="kfm-summary-label">{safe_label}</div>'
+        f'<div class="kfm-summary-value">{safe_value}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_result_kpi(label, value, card_class=""):
+    safe_label = html.escape(str(label))
+    safe_value = html.escape(str(value))
+
+    st.markdown(
+        f'<div class="kfm-result-kpi {card_class}">'
+        f'<div class="kfm-result-label">{safe_label}</div>'
+        f'<div class="kfm-result-value">{safe_value}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_build_status(loaded_count, skipped_count):
+    skipped_text = (
+        f"{skipped_count} skipped"
+        if skipped_count
+        else "All selected files processed"
+    )
+
+    st.markdown(
+        f"""
+        <div class="kfm-status">
+            <div class="kfm-status-title">Index Ready</div>
+            <div class="kfm-status-meta">
+                {loaded_count} documents loaded · {html.escape(skipped_text)}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 def uploaded_signature(uploaded_files):
     if not uploaded_files:
@@ -172,7 +807,7 @@ def document_stats_rows(processed_documents):
             {
                 "PMCID": document["pmcid"],
                 "File": document["filename"],
-                "Format": document.get("source_format", "JATS"),
+                "Format": document.get("source_format", "Unknown"),
                 "Characters": document["character_count"],
                 # M02 自行計算的字數：用來展示本系統的統計結果。
                 "Computed Words": document["computed_word_count"],
@@ -282,7 +917,7 @@ def highlight_snippet(context, matched_text, match_type):
 
     if match_type == "exact":
         marked = (
-            '<span style="color:#d32f2f;font-weight:700;">'
+            '<span class="kfm-snippet-exact">'
             f"{matched}"
             "</span>"
         )
@@ -589,8 +1224,8 @@ html {{
 
 body {{
     margin: 0;
-    background: #f5f7fa;
-    color: #202124;
+    background: #F4F6F0;
+    color: #1C2321;
     font-family:
         -apple-system,
         BlinkMacSystemFont,
@@ -613,10 +1248,10 @@ body {{
 .toolbar {{
     flex: 0 0 auto;
     z-index: 100;
-    background: #17365d;
+    background: #2E4031;
     color: white;
     padding: 14px 20px;
-    border-bottom: 1px solid #102a49;
+    border-bottom: 1px solid #1C2321;
 }}
 
 .article-scroll {{
@@ -663,7 +1298,7 @@ body {{
 
 .filter-button.active {{
     background: white;
-    color: #17365d;
+    color: #1C2321;
     font-weight: 700;
 }}
 
@@ -708,7 +1343,7 @@ body {{
 .article-title {{
     margin: 0 0 18px 0;
     line-height: 1.25;
-    color: #17365d;
+    color: #1C2321;
     font-size: 30px;
 }}
 
@@ -716,13 +1351,13 @@ body {{
     margin-top: 34px;
     margin-bottom: 15px;
     padding-bottom: 7px;
-    color: #17365d;
+    color: #1C2321;
     border-bottom: 2px solid #e5e9ef;
     font-size: 23px;
 }}
 
 .section-title {{
-    color: #244d7a;
+    color: #2E4031;
     margin-top: 25px;
     margin-bottom: 9px;
     font-size: 18px;
@@ -751,7 +1386,7 @@ body {{
 
 .keyword-chip {{
     display: inline-block;
-    background: #eef3f8;
+    background: #E8EEE6;
     border-radius: 12px;
     padding: 4px 9px;
     margin: 3px 5px 3px 0;
@@ -761,12 +1396,12 @@ body {{
 .figure-table-label {{
     margin-top: 16px;
     font-weight: 700;
-    color: #244d7a;
+    color: #2E4031;
 }}
 
 .table-text {{
-    background: #f8f9fa;
-    border: 1px solid #e3e6ea;
+    background: #F4F6F0;
+    border: 1px solid #D7E0D4;
     border-radius: 6px;
     padding: 12px;
     line-height: 1.6;
@@ -776,32 +1411,32 @@ body {{
 
 .reference {{
     padding-left: 12px;
-    border-left: 3px solid #e0e4e8;
-    color: #3c4043;
+    border-left: 3px solid #8FBC8F;
+    color: #5F6D63;
     font-size: 14px;
 }}
 
 .match.exact {{
-    color: #c62828;
+    color: #1C2321;
     font-weight: 800;
 }}
 
 .match.related {{
     font-weight: 800;
-    text-decoration: underline dotted #555;
+    text-decoration: underline dotted #2E4031;
     text-underline-offset: 3px;
 }}
 
 .match.active-match {{
-    background: #fff59d;
-    color: #b71c1c;
-    outline: 3px solid #ffca28;
-    border-radius: 2px;
-    padding: 1px 2px;
+    background: #FFF3B0;
+    color: #1C2321;
+    outline: 3px solid #E0B400;
+    border-radius: 4px;
+    padding: 1px 3px;
 }}
 
 .match.related.active-match {{
-    color: #202124;
+    color: #1C2321;
 }}
 </style>
 </head>
@@ -1184,9 +1819,9 @@ with st.sidebar:
         """
 **Result display**
 
-Exact → red  
-Related → bold  
-Current match → yellow
+Exact → deep blue  
+Related → bold / dotted underline  
+Current match → moss green
         """
     )
 
@@ -1224,30 +1859,35 @@ Current match → yellow
 # HEADER
 # ============================================================
 
-st.title(
-    "Keyword-based Full-Text Matching"
+render_hero()
+
+
+# ============================================================
+# 1. LOAD DOCUMENTS
+# ============================================================
+
+render_section_header(
+    "01",
+    "Load Documents",
+    "Upload biomedical XML files, then build the positional index.",
 )
 
 st.caption(
-    "Upload XML → Build Index → Search → Open Article → Locate Match"
+    "Supported input: JATS XML · BioC XML · Generic XML fallback"
 )
 
-
-# ============================================================
-# 1. UPLOAD
-# ============================================================
-
-st.header("1. Load Documents")
-
 uploaded_files = st.file_uploader(
-    "Upload one or more XML files (JATS / BioC / Generic XML)",
+    "Upload XML files",
     type=["xml"],
     accept_multiple_files=True,
+    label_visibility="collapsed",
 )
 
 if uploaded_files:
-    st.write(
-        f"**Selected files:** {len(uploaded_files)}"
+    selected_count = len(uploaded_files)
+
+    st.markdown(
+        f"**Selected files:** {selected_count}"
     )
 
     with st.expander(
@@ -1261,7 +1901,7 @@ if uploaded_files:
 
 
 build_button = st.button(
-    "Analyze / Build Index",
+    "Analyze & Build Index",
     type="primary",
     disabled=not uploaded_files,
 )
@@ -1320,38 +1960,13 @@ if build_button:
 
 
 # ============================================================
-# BUILD ERRORS
-# ============================================================
-
-if st.session_state["build_errors"]:
-    skipped_count = len(
-        st.session_state["build_errors"]
-    )
-
-    st.warning(
-        f"{skipped_count} XML file(s) could not be processed. "
-        "Other valid files were still indexed."
-    )
-
-    for error in st.session_state[
-        "build_errors"
-    ]:
-        st.error(
-            f"{error['filename']} — "
-            f"{error['error']}"
-        )
-
-
-# ============================================================
 # NOT READY
 # ============================================================
 
 if not st.session_state["index_ready"]:
     st.info(
-        "Upload XML files and click "
-        "'Analyze / Build Index' to begin. "
-        "JATS and BioC receive structured parsing; "
-        "other valid XML uses Generic XML fallback."
+        "Choose XML files, then click "
+        "'Analyze & Build Index'."
     )
     st.stop()
 
@@ -1390,7 +2005,7 @@ if (
 ):
     st.warning(
         "The uploaded file selection has changed. "
-        "Click 'Analyze / Build Index' again before searching."
+        "Click 'Analyze & Build Index' again before searching."
     )
 
 
@@ -1402,35 +2017,52 @@ skipped_count = len(
     st.session_state["build_errors"]
 )
 
+render_build_status(
+    loaded_count,
+    skipped_count,
+)
+
 if skipped_count:
-    st.success(
-        f"Index Ready — "
-        f"{loaded_count} documents loaded · "
-        f"{skipped_count} skipped"
-    )
-else:
-    st.success(
-        f"Index Ready — "
-        f"{loaded_count} documents loaded"
-    )
+    with st.expander(
+        f"Processing Details · {skipped_count} skipped",
+        expanded=False,
+    ):
+        st.caption(
+            "Skipped files do not prevent valid documents from being indexed."
+        )
+
+        for error in st.session_state[
+            "build_errors"
+        ]:
+            st.write(
+                f"**{error['filename']}** — "
+                f"{error['error']}"
+            )
 
 
 metric1, metric2, metric3 = st.columns(3)
 
-metric1.metric(
-    "Documents",
-    index_data["total_documents"],
-)
+with metric1:
+    render_index_kpi(
+        "Documents",
+        f"{index_data['total_documents']:,}",
+        "Successfully indexed",
+        "primary",
+    )
 
-metric2.metric(
-    "Indexed Words",
-    index_data["total_terms"],
-)
+with metric2:
+    render_index_kpi(
+        "Indexed Words",
+        f"{index_data['total_terms']:,}",
+        "Searchable word positions",
+    )
 
-metric3.metric(
-    "Unique Terms",
-    index_data["unique_terms"],
-)
+with metric3:
+    render_index_kpi(
+        "Unique Terms",
+        f"{index_data['unique_terms']:,}",
+        "Index vocabulary",
+    )
 
 
 # ============================================================
@@ -1562,7 +2194,7 @@ if st.session_state["view_mode"] == "article":
 
     st.caption(
         "Use Previous / Next to move through matches. "
-        "Current match = yellow."
+        "Current match = moss green."
     )
 
     viewer_html = build_article_viewer_html(
@@ -1608,50 +2240,63 @@ with st.expander(
 
 
 # ============================================================
-# 3. SEARCH
+# 2. SEARCH
 # ============================================================
 
-st.header("2. Search")
+render_section_header(
+    "02",
+    "Search",
+    "Enter a word, phrase, or sentence. Auto mode selects the retrieval strategy.",
+)
 
 with st.form(
     "search_form",
     clear_on_submit=False,
 ):
-    query = st.text_area(
-        "Enter a word, phrase, or sentence",
-        placeholder=(
-            "Examples:\n"
-            "cancer\n"
-            "physical activity\n"
-            "This study reviews the evidence "
-            "to clarify association.\n"
-            "eurol Sc  (Literal / Ctrl+F style)"
-        ),
-        height=90,
+    search_col, type_col, button_col = st.columns(
+        [7.6, 1.7, 1.45]
     )
 
-    query_type_label = st.selectbox(
-        "Query Type",
-        [
-            "Auto",
-            "Word",
-            "Phrase",
-            "Sentence",
-            "Literal Text",
-        ],
-        help=(
-            "Auto 會先使用一般 Word / Phrase / Sentence 檢索；"
-            "若完全找不到，再自動使用 Literal Substring。 "
-            "Literal Text 則直接使用類似瀏覽器 Ctrl+F 的連續字元搜尋。"
-        ),
-    )
+    with search_col:
+        query = st.text_input(
+            "Search query",
+            placeholder="Enter a word, phrase, or sentence",
+            label_visibility="collapsed",
+        )
 
-    search_button = (
-        st.form_submit_button(
+    with type_col:
+        query_type_label = st.selectbox(
+            "Query Type",
+            [
+                "Auto",
+                "Word",
+                "Phrase",
+                "Sentence",
+                "Literal Text",
+            ],
+            help=(
+                "Auto first uses Word / Phrase / Sentence retrieval. "
+                "If no positional match is found, it falls back to "
+                "Literal Substring search."
+            ),
+            label_visibility="collapsed",
+        )
+
+    with button_col:
+        search_button = st.form_submit_button(
             "Search",
             type="primary",
+            use_container_width=True,
         )
-    )
+
+
+st.markdown(
+    '<div class="kfm-search-help">'
+    'Examples: cancer · physical activity · '
+    'This study reviews the evidence to clarify association.'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
 
 query_type_map = {
@@ -1702,10 +2347,16 @@ if result is None:
     st.stop()
 
 
-st.subheader("Search Summary")
+render_subheading("Search Summary")
 
 st.markdown(
-    f"**Query:** {html.escape(result['query'])}"
+    (
+        '<div class="kfm-query-line">'
+        '<strong>Query:</strong> '
+        f'<span class="kfm-query-value">{html.escape(result["query"])}</span>'
+        '</div>'
+    ),
+    unsafe_allow_html=True,
 )
 
 with st.expander(
@@ -1727,28 +2378,34 @@ summary1, summary2, summary3, summary4 = (
     st.columns(4)
 )
 
-summary1.metric(
-    "Documents with Matches",
-    (
-        f"{result['documents_found']} "
-        f"/ {index_data['total_documents']}"
-    ),
-)
+with summary1:
+    render_kpi_card(
+        "Retrieved Documents",
+        (
+            f"{result['documents_found']} "
+            f"/ {index_data['total_documents']}"
+        ),
+        "primary",
+    )
 
-summary2.metric(
-    "Exact Occurrences",
-    result["exact_matches"],
-)
+with summary2:
+    render_kpi_card(
+        "Exact Matches",
+        result["exact_matches"],
+        "exact",
+    )
 
-summary3.metric(
-    "Related Occurrences",
-    result["related_matches"],
-)
+with summary3:
+    render_kpi_card(
+        "Related Matches",
+        result["related_matches"],
+    )
 
-summary4.metric(
-    "Total Occurrences",
-    result["total_matches"],
-)
+with summary4:
+    render_kpi_card(
+        "Total Matches",
+        result["total_matches"],
+    )
 
 
 # ============================================================
@@ -1781,7 +2438,7 @@ if result["total_matches"] == 0:
 # DOCUMENT RESULT CARDS
 # ============================================================
 
-st.subheader("Search Results")
+render_subheading("Search Results")
 
 st.caption(
     "One card per matching document. "
@@ -1823,15 +2480,43 @@ for document_id, items in sort_document_results(
             document["title"]
         )
 
-        st.caption(
-            document_id
+        source_format = document.get(
+            "source_format",
+            "Unknown",
         )
 
         st.markdown(
-            f"**Exact:** {exact_count}  ·  "
-            f"**Related:** {related_count}  ·  "
-            f"**Total:** {len(items)}"
+            (
+                '<div class="kfm-meta-row">'
+                f'<span class="kfm-chip">{html.escape(str(document_id))}</span>'
+                f'<span class="kfm-chip format">{html.escape(str(source_format))}</span>'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
         )
+
+        result_kpi1, result_kpi2, result_kpi3 = (
+            st.columns(3)
+        )
+
+        with result_kpi1:
+            render_result_kpi(
+                "Exact Matches",
+                exact_count,
+                "exact",
+            )
+
+        with result_kpi2:
+            render_result_kpi(
+                "Related Matches",
+                related_count,
+            )
+
+        with result_kpi3:
+            render_result_kpi(
+                "Total Matches",
+                len(items),
+            )
 
         if snippet_item:
             snippet_html = highlight_snippet(
@@ -1846,11 +2531,7 @@ for document_id, items in sort_document_results(
 
             st.markdown(
                 (
-                    '<div style="'
-                    'line-height:1.65;'
-                    'font-size:1rem;'
-                    'margin:4px 0 10px 0;'
-                    '">'
+                    '<div class="kfm-snippet">'
                     f"{snippet_html}"
                     "</div>"
                 ),

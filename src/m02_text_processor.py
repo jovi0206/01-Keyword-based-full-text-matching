@@ -795,6 +795,10 @@ def process_document(document):
         "filename":
             document["filename"],
 
+        # 保留 M01 判定的 XML 格式，供後續模組與 UI 顯示。
+        "source_format":
+            document.get("source_format", "JATS"),
+
         "pmcid":
             document["pmcid"],
 

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection>
+  <source>NCBI BioC Demo</source>
+  <date>2026-09-11</date>
+  <key>demo</key>
+
+  <document>
+    <id>99900002</id>
+
+    <passage>
+      <infon key="type">title</infon>
+      <infon key="section_type">TITLE</infon>
+      <infon key="article-id_pmc">99900002</infon>
+      <infon key="article-id_pmid">99900002</infon>
+      <infon key="article-id_doi">10.9999/demo.bioc.002</infon>
+      <infon key="name_0">surname:Lin;given-names:Jamie</infon>
+      <offset>0</offset>
+      <text>Menopause Information Retrieval</text>
+    </passage>
+
+    <passage>
+      <infon key="type">abstract</infon>
+      <infon key="section_type">ABSTRACT</infon>
+      <offset>33</offset>
+      <text>This BioC document discusses menopause, symptoms, and retrieval of clinical information.</text>
+    </passage>
+
+    <passage>
+      <infon key="type">paragraph</infon>
+      <infon key="section_type">INTRO</infon>
+      <offset>120</offset>
+      <text>Keyword retrieval can identify menopause information inside a BioC document.</text>
+    </passage>
+  </document>
+</collection>

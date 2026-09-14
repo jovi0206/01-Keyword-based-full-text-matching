@@ -334,6 +334,10 @@ def map_document_positions(
         "filename":
             processed_document["filename"],
 
+        # 延續 M02 的格式資訊，避免 Metadata 在模組間遺失。
+        "source_format":
+            processed_document.get("source_format", "JATS"),
+
         "pmcid":
             processed_document["pmcid"],
 
