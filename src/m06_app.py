@@ -2623,9 +2623,9 @@ with st.expander(
         "Document Statistics use a dedicated statistics corpus. "
         "For JATS, the scope is Front (excluding permissions) + Body + Back; "
         "for BioC, all visible passage text; for Generic XML, all visible text. "
-        "Computed Words use whitespace segmentation, Sentences use pySBD, "
+        "Computed Words use the shared Regex tokenizer, Sentences use pySBD, "
         "and Reported Words come from the source XML when available. "
-        "Search tokenization remains separate and is unchanged."
+        "Statistics and Search use the same Regex tokenizer, while their corpus scopes remain different."
     )
 
 

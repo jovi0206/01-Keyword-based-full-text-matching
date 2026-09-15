@@ -126,21 +126,19 @@ def normalize_stats_text(text):
 
 
 # ============================================================
-# 4. DOCUMENT STATISTICS TOKENIZATION
+# 4. DOCUMENT STATISTICS CORPUS NORMALIZATION
 # ============================================================
 #
-# Document Statistics 與 Search Tokenization 分開處理。
+# Statistics Corpus 與 Search Corpus 的「範圍」不同，
+# 但兩者使用同一套 Regex tokenizer（WORD_PATTERN）。
 #
-# Statistics:
-#     使用 whitespace segmentation
+# Statistics Corpus:
+#     用於 Characters / Computed Words / Sentences
 #
-#     cancer        -> 1
-#     breast cancer -> 2
-#     DPP-4         -> 1
+# Search Corpus:
+#     用於 Position Mapping / Inverted Index / Search
 #
-# Search:
-#     仍使用下方 WORD_PATTERN Regex tokenizer，
-#     M03 ~ M05 的索引與查詢行為不改變。
+# 這樣系統對「什麼是一個 Word」只保留一套定義。
 # ============================================================
 
 def normalize_statistics_corpus(text):
@@ -154,6 +152,7 @@ def normalize_statistics_corpus(text):
 
 
 def tokenize_statistics_words(text):
+    """Tokenize Document Statistics with the shared Regex tokenizer."""
 
     text = normalize_statistics_corpus(
         text
@@ -162,7 +161,11 @@ def tokenize_statistics_words(text):
     if not text:
         return []
 
-    return text.split()
+    # tokenize_words() is the same Regex tokenizer used by Search.
+    # The function is defined below; Python resolves it when called.
+    return tokenize_words(
+        text
+    )
 
 
 # ============================================================
@@ -854,7 +857,7 @@ def process_document(document):
     #
     # Computed Words:
     #     本系統依 statistics_text
-    #     使用 whitespace segmentation 計算。
+    #     使用與 Search 相同的 Regex tokenizer 計算。
     #
     # Reported Words:
     #     JATS XML <word-count> 提供的來源數字。
@@ -949,7 +952,7 @@ def process_document(document):
             ),
 
         "statistics_word_method":
-            "Whitespace segmentation",
+            "Regex tokenizer",
 
         "statistics_sentence_method":
             "pySBD sentence segmentation",
