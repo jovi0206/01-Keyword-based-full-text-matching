@@ -572,7 +572,7 @@ st.markdown(
         border-spacing: 0;
         background: var(--kfm-card);
         color: var(--kfm-ink);
-        font-size: 0.92rem;
+        font-size: 1.22rem;
         border: 1px solid var(--kfm-border);
         border-radius: 10px;
         overflow: hidden;
@@ -581,17 +581,20 @@ st.markdown(
     .kfm-stats-table th {
         background: var(--kfm-soft);
         color: var(--kfm-forest);
-        font-weight: 800;
+        font-size: 1.32rem;
+        font-weight: 850;
         text-align: left;
-        padding: 11px 12px;
+        padding: 15px 14px;
         border-bottom: 1px solid var(--kfm-border);
         white-space: nowrap;
     }
 
     .kfm-stats-table td {
-        padding: 10px 12px;
+        font-size: 1.22rem;
+        padding: 16px 14px;
         border-bottom: 1px solid var(--kfm-border);
-        vertical-align: top;
+        vertical-align: middle;
+        line-height: 1.45;
     }
 
     .kfm-stats-table tbody tr:last-child td {
@@ -808,7 +811,7 @@ def render_hero():
     st.markdown(
         """
         <div class="kfm-hero">
-            <div class="kfm-hero-kicker">Artificial Intelligence Information Retrieval</div>
+            <div class="kfm-hero-kicker">Biomedical Information Retrieval</div>
             <div class="kfm-hero-title">Keyword-based Full-Text Matching</div>
             <div class="kfm-flow">
                 <span class="kfm-flow-step">Upload XML</span>
@@ -1031,16 +1034,16 @@ def document_stats_rows(processed_documents):
                 "PMCID": document["pmcid"],
                 "File": document["filename"],
                 "Format": document.get("source_format", "Unknown"),
-                "Characters": document["character_count"],
-                # M02 自行計算的字數：用來展示本系統的統計結果。
-                "Computed Words": document["computed_word_count"],
-                # 使用文字欄位，讓缺少 JATS 字數時可顯示破折號。
+                "Characters": f"{document['character_count']:,}",
+                # M02 自行計算的字數：只改顯示格式，不改實際統計值。
+                "Computed Words": f"{document['computed_word_count']:,}",
+                # 缺少來源字數時顯示破折號；有數字時加入千分位。
                 "JATS Reported Words": (
-                    str(document["jats_reported_word_count"])
+                    f"{document['jats_reported_word_count']:,}"
                     if document.get("jats_reported_word_count") is not None
                     else "—"
                 ),
-                "Sentences": document["sentence_count"],
+                "Sentences": f"{document['sentence_count']:,}",
             }
         )
 
@@ -2092,7 +2095,7 @@ render_hero()
 render_section_header(
     "01",
     "Load Documents",
-    "Upload XML files, then build the positional index.",
+    "Upload biomedical XML files, then build the positional index.",
 )
 
 st.caption(
@@ -2579,9 +2582,10 @@ with st.expander(
 
     table_rows = []
 
-    for row in stats_rows:
+    for row_number, row in enumerate(stats_rows, start=1):
         table_rows.append(
             "<tr>"
+            f'<td>{row_number}</td>'
             f'<td>{html.escape(str(row["PMCID"] or "—"))}</td>'
             f'<td>{html.escape(str(row["File"]))}</td>'
             f'<td>{html.escape(str(row["Format"]))}</td>'
@@ -2596,6 +2600,7 @@ with st.expander(
         '<div class="kfm-stats-table-wrap">'
         '<table class="kfm-stats-table">'
         '<thead><tr>'
+        '<th>No.</th>'
         '<th>PMCID</th>'
         '<th>XML File</th>'
         '<th>XML Format</th>'
@@ -2615,11 +2620,12 @@ with st.expander(
     )
 
     st.caption(
-        "Computed Words are calculated by this system using its tokenizer. "
-        "Reported Words come from the source XML when available. "
-        "Counts can differ because the source and this system may use different "
-        "counting rules and coverage. References remain searchable but are "
-        "excluded from article statistics."
+        "Document Statistics use a dedicated statistics corpus. "
+        "For JATS, the scope is Front (excluding permissions) + Body + Back; "
+        "for BioC, all visible passage text; for Generic XML, all visible text. "
+        "Computed Words use whitespace segmentation, Sentences use pySBD, "
+        "and Reported Words come from the source XML when available. "
+        "Search tokenization remains separate and is unchanged."
     )
 
 

@@ -87,6 +87,148 @@ def normalize_inline_text(text):
     )
 
 
+
+# ============================================================
+# Statistics Text Helpers
+# ============================================================
+#
+# 這一組函式只給「文件統計」使用。
+#
+# 與一般 normalize_inline_text() 不同：
+#     只整理連續空白
+#     不移除標點前空白
+#
+# 原因：
+#     JATS 的文字分散在許多 inline XML nodes 中。
+#     統計 Word 時，我們希望保留 XML text node 之間的
+#     whitespace boundary，避免把原本分開的 token 合併。
+# ============================================================
+
+def normalize_statistics_text(text):
+
+    if not text:
+        return ""
+
+    return " ".join(
+        text.split()
+    )
+
+
+def get_statistics_text(
+    element,
+    excluded_tags=None
+):
+
+    if element is None:
+        return ""
+
+    excluded_tags = set(
+        excluded_tags
+        or []
+    )
+
+    parts = []
+
+    def walk(node):
+
+        if node.text:
+            parts.append(
+                node.text
+            )
+
+        for child in node:
+
+            if local_name(child) in excluded_tags:
+
+                # 排除整個 subtree，
+                # 但仍保留 subtree 後面的 tail。
+                if child.tail:
+                    parts.append(
+                        child.tail
+                    )
+
+                continue
+
+            walk(
+                child
+            )
+
+            if child.tail:
+                parts.append(
+                    child.tail
+                )
+
+    walk(
+        element
+    )
+
+    return normalize_statistics_text(
+        " ".join(parts)
+    )
+
+
+def build_jats_statistics_text(
+    front,
+    body,
+    back
+):
+
+    # --------------------------------------------------------
+    # JATS 統計範圍
+    #
+    # Front:
+    #     保留 metadata / title / author / identifiers...
+    #     排除 permissions / license 文字
+    #
+    # Body:
+    #     保留完整可見文字
+    #     包含 citation number、table、figure 等
+    #
+    # Back:
+    #     保留完整可見文字
+    #     包含 references
+    # --------------------------------------------------------
+
+    front_text = get_statistics_text(
+        front,
+        excluded_tags={
+            "permissions"
+        }
+    )
+
+    body_text = get_statistics_text(
+        body
+    )
+
+    back_text = get_statistics_text(
+        back
+    )
+
+    combined = "\n".join(
+        text
+        for text in (
+            front_text,
+            body_text,
+            back_text
+        )
+        if text
+    )
+
+    return {
+        "front":
+            front_text,
+
+        "body":
+            body_text,
+
+        "back":
+            back_text,
+
+        "combined":
+            combined
+    }
+
+
 # ------------------------------------------------------------
 # 取得 Element 文字
 #
@@ -953,6 +1095,26 @@ def _parse_jats_only(
     )
 
     # --------------------------------------------------------
+    # Statistics Corpus
+    # --------------------------------------------------------
+    #
+    # 這裡另外保留「統計專用全文」。
+    #
+    # Search Corpus 仍維持原本的 structured fields；
+    # M03 ~ M05 的搜尋、位置與索引邏輯不受影響。
+    # --------------------------------------------------------
+
+    back_element = article.find(
+        "./{*}back"
+    )
+
+    jats_statistics = build_jats_statistics_text(
+        front=front,
+        body=body_element,
+        back=back_element
+    )
+
+    # --------------------------------------------------------
     # Structured Document
     # --------------------------------------------------------
 
@@ -1060,6 +1222,39 @@ def _parse_jats_only(
 
         "references":
             references,
+
+        # ---------------------------------------------
+        # Statistics Corpus
+        # ---------------------------------------------
+        #
+        # JATS:
+        #     Front (excluding permissions)
+        #     + Body
+        #     + Back
+        #
+        # 這組文字只用來做：
+        #     Character / Word / Sentence Statistics
+        #
+        # 搜尋仍使用上面的 structured fields。
+        # ---------------------------------------------
+
+        "statistics_front_text":
+            jats_statistics["front"],
+
+        "statistics_body_text":
+            jats_statistics["body"],
+
+        "statistics_back_text":
+            jats_statistics["back"],
+
+        "statistics_text":
+            jats_statistics["combined"],
+
+        "statistics_scope":
+            (
+                "JATS front (excluding permissions) "
+                "+ body + back"
+            ),
 
         # JATS Source Counts
         "reported_word_count":
@@ -2017,6 +2212,10 @@ def parse_bioc(
 
     references = []
 
+    # 統計專用：每個 BioC passage 的可見文字只收一次，
+    # 避免用 structured fields 重新拼接時重複計算。
+    statistics_passage_texts = []
+
     # --------------------------------------------------------
     # 每個 passage
     # --------------------------------------------------------
@@ -2064,6 +2263,10 @@ def parse_bioc(
             text = clean_embedded_bioc_markup(
                 text
             )
+
+        statistics_passage_texts.append(
+            text
+        )
 
         # ----------------------------------------------------
         # Article title
@@ -2321,6 +2524,16 @@ def parse_bioc(
         )
 
     # --------------------------------------------------------
+    # Statistics Corpus
+    # --------------------------------------------------------
+
+    bioc_statistics_text = normalize_statistics_text(
+        " ".join(
+            statistics_passage_texts
+        )
+    )
+
+    # --------------------------------------------------------
     # Structured Document
     #
     # 欄位名稱與 JATS Parser 完全對齊，
@@ -2417,6 +2630,25 @@ def parse_bioc(
 
         "references":
             references,
+
+        # ---------------------------------------------
+        # Statistics Corpus
+        # ---------------------------------------------
+
+        "statistics_front_text":
+            "",
+
+        "statistics_body_text":
+            bioc_statistics_text,
+
+        "statistics_back_text":
+            "",
+
+        "statistics_text":
+            bioc_statistics_text,
+
+        "statistics_scope":
+            "All visible BioC passage text",
 
         # BioC 標準本身沒有 JATS counts 這組欄位。
         # 後續 M02 會自動使用 Computed Word Count。
@@ -2678,6 +2910,17 @@ def parse_generic_xml(
         else []
     )
 
+    generic_statistics_text = normalize_statistics_text(
+        " ".join(
+            text
+            for text in (
+                title,
+                full_text
+            )
+            if text
+        )
+    )
+
     document = {
 
         "filename":
@@ -2757,6 +3000,25 @@ def parse_generic_xml(
 
         "references":
             [],
+
+        # ---------------------------------------------
+        # Statistics Corpus
+        # ---------------------------------------------
+
+        "statistics_front_text":
+            "",
+
+        "statistics_body_text":
+            generic_statistics_text,
+
+        "statistics_back_text":
+            "",
+
+        "statistics_text":
+            generic_statistics_text,
+
+        "statistics_scope":
+            "All visible Generic XML text",
 
         "reported_word_count":
             None,
@@ -2914,6 +3176,16 @@ if __name__ == "__main__":
             print(
                 f"References        : "
                 f"{len(document['references'])}"
+            )
+
+            print(
+                f"Statistics Scope  : "
+                f"{document.get('statistics_scope', '')}"
+            )
+
+            print(
+                f"Statistics Words  : "
+                f"{len(document.get('statistics_text', '').split())}"
             )
 
             print(

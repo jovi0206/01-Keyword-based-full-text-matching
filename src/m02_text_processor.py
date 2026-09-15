@@ -1,4 +1,5 @@
 from pathlib import Path
+from functools import lru_cache
 import re
 import pysbd
 
@@ -123,6 +124,47 @@ def normalize_stats_text(text):
     return normalize_text(text)
 
 
+
+# ============================================================
+# 4. DOCUMENT STATISTICS TOKENIZATION
+# ============================================================
+#
+# Document Statistics 與 Search Tokenization 分開處理。
+#
+# Statistics:
+#     使用 whitespace segmentation
+#
+#     cancer        -> 1
+#     breast cancer -> 2
+#     DPP-4         -> 1
+#
+# Search:
+#     仍使用下方 WORD_PATTERN Regex tokenizer，
+#     M03 ~ M05 的索引與查詢行為不改變。
+# ============================================================
+
+def normalize_statistics_corpus(text):
+
+    if not text:
+        return ""
+
+    return " ".join(
+        text.split()
+    )
+
+
+def tokenize_statistics_words(text):
+
+    text = normalize_statistics_corpus(
+        text
+    )
+
+    if not text:
+        return []
+
+    return text.split()
+
+
 # ============================================================
 # 4. WORD TOKENIZATION
 # ============================================================
@@ -189,6 +231,27 @@ def tokenize_words(text):
 # 等常見特殊情況。
 # ============================================================
 
+@lru_cache(maxsize=4096)
+def _segment_sentences_cached(normalized_text):
+    """
+    Cache pySBD results for identical normalized text.
+
+    The same paragraph/caption/reference can be used by both
+    Document Statistics support structures and Search Segments.
+    Caching prevents pySBD from parsing the same text twice.
+    """
+
+    raw_sentences = SENTENCE_SEGMENTER.segment(
+        normalized_text
+    )
+
+    return tuple(
+        normalize_text(sentence)
+        for sentence in raw_sentences
+        if normalize_text(sentence)
+    )
+
+
 def segment_sentences(text):
 
     text = normalize_text(text)
@@ -196,18 +259,10 @@ def segment_sentences(text):
     if not text:
         return []
 
-    sentences = SENTENCE_SEGMENTER.segment(
-        text
+    # Return a new list so callers cannot mutate the cached tuple.
+    return list(
+        _segment_sentences_cached(text)
     )
-
-    return [
-
-        normalize_text(sentence)
-
-        for sentence in sentences
-
-        if normalize_text(sentence)
-    ]
 
 
 # ============================================================
@@ -228,8 +283,13 @@ def analyze_segment(
         text
     )
 
-    sentences = segment_sentences(
-        text
+    # Only run pySBD when this segment actually contributes
+    # to sentence statistics. Section titles/table cells that are
+    # not counted as sentences skip the expensive segmentation step.
+    sentences = (
+        segment_sentences(text)
+        if count_sentence
+        else []
     )
 
     return {
@@ -684,7 +744,13 @@ def build_search_segments(document):
 def process_document(document):
 
     # --------------------------------------------------------
-    # Stats Segments
+    # Legacy / Structured Stats Segments
+    # --------------------------------------------------------
+    #
+    # 保留這組輸出，方便除錯與向下相容。
+    #
+    # 但最終 Document Statistics 不再用它當主要來源；
+    # 會優先使用 M01 提供的 statistics_text。
     # --------------------------------------------------------
 
     raw_stats_segments = build_stats_segments(
@@ -693,19 +759,13 @@ def process_document(document):
 
     processed_stats_segments = []
 
-    all_words = []
-    all_sentences = []
-
-    stats_text_parts = []
+    fallback_stats_text_parts = []
 
     for segment in raw_stats_segments:
 
         result = analyze_segment(
-
             segment["field"],
-
             segment["text"],
-
             segment["count_sentence"]
         )
 
@@ -713,34 +773,70 @@ def process_document(document):
             result
         )
 
-        stats_text_parts.append(
+        fallback_stats_text_parts.append(
             result["text"]
         )
 
-        all_words.extend(
-            result["words"]
+    fallback_stats_text = "\n".join(
+        fallback_stats_text_parts
+    )
+
+    # --------------------------------------------------------
+    # Document Statistics Corpus
+    # --------------------------------------------------------
+    #
+    # M01 新版會提供 statistics_text：
+    #
+    # JATS:
+    #     Front (excluding permissions)
+    #     + Body
+    #     + Back
+    #
+    # BioC:
+    #     所有 passage 可見文字
+    #
+    # Generic XML:
+    #     所有可見文字
+    #
+    # 若遇到舊版 M01，才 fallback 到舊 stats segments。
+    # --------------------------------------------------------
+
+    statistics_text = normalize_statistics_corpus(
+        document.get(
+            "statistics_text",
+            ""
+        )
+    )
+
+    if not statistics_text:
+
+        statistics_text = (
+            normalize_statistics_corpus(
+                fallback_stats_text
+            )
         )
 
-        if segment[
-            "count_sentence"
-        ]:
+    statistics_words = tokenize_statistics_words(
+        statistics_text
+    )
 
-            all_sentences.extend(
-                result["sentences"]
-            )
-
-    # --------------------------------------------------------
-    # 用換行連接 Segment
-    #
-    # Character Position 之後也會有固定基準。
-    # --------------------------------------------------------
-
-    stats_text = "\n".join(
-        stats_text_parts
+    statistics_sentences = segment_sentences(
+        statistics_text
     )
 
     # --------------------------------------------------------
     # Search Segments
+    # --------------------------------------------------------
+    #
+    # 搜尋仍沿用原本 structured fields + Regex tokenizer。
+    # segment_sentences() 具有 LRU cache；若某段文字先前已由
+    # Statistics support structures 切句，這裡直接重用結果，
+    # 不會再次執行 pySBD。
+    #
+    # 因此本次統計優化不改變：
+    #     M03 Position Mapping
+    #     M04 Positional Index
+    #     M05 Query Engine
     # --------------------------------------------------------
 
     search_segments = build_search_segments(
@@ -748,33 +844,36 @@ def process_document(document):
     )
 
     search_text = "\n".join(
-
         segment["text"]
-
-        for segment
-        in search_segments
+        for segment in search_segments
     )
 
-# --------------------------------------------------------
-# Word Count Strategy
-#
-# 1. 永遠保留我們自己計算的字數
-# 2. JATS 有提供 <word-count> → 優先使用 JATS
-# 3. JATS 沒有提供 → 使用我們自己計算的字數
-# --------------------------------------------------------
+    # --------------------------------------------------------
+    # Word Count
+    # --------------------------------------------------------
+    #
+    # Computed Words:
+    #     本系統依 statistics_text
+    #     使用 whitespace segmentation 計算。
+    #
+    # Reported Words:
+    #     JATS XML <word-count> 提供的來源數字。
+    #
+    # 兩者分開保留，不再用 Reported 覆蓋 Computed。
+    # --------------------------------------------------------
 
-    computed_word_count = len(all_words)
+    computed_word_count = len(
+        statistics_words
+    )
 
-    reported_word_count = document[
+    reported_word_count = document.get(
         "reported_word_count"
-    ]
+    )
 
     if isinstance(
         reported_word_count,
         int
     ):
-        final_word_count = reported_word_count
-        word_count_source = "JATS"
 
         word_count_difference = (
             computed_word_count
@@ -782,8 +881,7 @@ def process_document(document):
         )
 
     else:
-        final_word_count = computed_word_count
-        word_count_source = "Computed"
+
         word_count_difference = None
 
     # ========================================================
@@ -797,7 +895,10 @@ def process_document(document):
 
         # 保留 M01 判定的 XML 格式，供後續模組與 UI 顯示。
         "source_format":
-            document.get("source_format", "JATS"),
+            document.get(
+                "source_format",
+                "Unknown"
+            ),
 
         "pmcid":
             document["pmcid"],
@@ -810,38 +911,62 @@ def process_document(document):
         # ---------------------------------------------
 
         "character_count":
-            len(stats_text),
+            len(
+                statistics_text
+            ),
 
         "character_count_without_spaces":
             len(
                 re.sub(
                     r"\s+",
                     "",
-                    stats_text
+                    statistics_text
                 )
             ),
 
+        # word_count 現在就是「本系統實際計算值」。
         "word_count":
-            final_word_count,
+            computed_word_count,
 
         "word_count_source":
-            word_count_source,
+            "Computed",
 
         "computed_word_count":
             computed_word_count,
 
         "sentence_count":
-            len(all_sentences),
+            len(
+                statistics_sentences
+            ),
+
+        "statistics_text":
+            statistics_text,
+
+        "statistics_scope":
+            document.get(
+                "statistics_scope",
+                "Structured article content"
+            ),
+
+        "statistics_word_method":
+            "Whitespace segmentation",
+
+        "statistics_sentence_method":
+            "pySBD sentence segmentation",
 
         # ---------------------------------------------
         # Token / Sentence Lists
         # ---------------------------------------------
+        #
+        # 這裡代表 Document Statistics corpus。
+        # Search / Position 仍使用 search_segments。
+        # ---------------------------------------------
 
         "words":
-            all_words,
+            statistics_words,
 
         "sentences":
-            all_sentences,
+            statistics_sentences,
 
         # ---------------------------------------------
         # Structured Segments
@@ -861,7 +986,7 @@ def process_document(document):
             search_text,
 
         # ---------------------------------------------
-        # Validation
+        # Validation / Comparison
         # ---------------------------------------------
 
         "jats_reported_word_count":
@@ -950,6 +1075,21 @@ if __name__ == "__main__":
             print(
                 f"Sentence Count           : "
                 f"{processed['sentence_count']}"
+            )
+
+            print(
+                f"Statistics Scope         : "
+                f"{processed['statistics_scope']}"
+            )
+
+            print(
+                f"Word Method              : "
+                f"{processed['statistics_word_method']}"
+            )
+
+            print(
+                f"Sentence Method          : "
+                f"{processed['statistics_sentence_method']}"
             )
 
             print()

@@ -125,7 +125,8 @@ def map_word_positions(
 def map_sentence_positions(
     text,
     global_char_offset,
-    global_sentence_offset
+    global_sentence_offset,
+    presegmented_sentences=None
 ):
 
     positions = []
@@ -133,9 +134,16 @@ def map_sentence_positions(
     if not text:
         return positions
 
-    raw_sentences = SENTENCE_SEGMENTER.segment(
-        text
-    )
+    # M02 already performs pySBD sentence segmentation for every
+    # Search Segment. Reuse those sentences here instead of running
+    # pySBD a second time. The fallback keeps compatibility with an
+    # older M02 that does not provide pre-segmented sentences.
+    if presegmented_sentences is not None:
+        raw_sentences = presegmented_sentences
+    else:
+        raw_sentences = SENTENCE_SEGMENTER.segment(
+            text
+        )
 
     search_cursor = 0
 
@@ -258,7 +266,10 @@ def map_document_positions(
         sentence_positions = map_sentence_positions(
             text,
             global_char_offset,
-            global_sentence_offset
+            global_sentence_offset,
+            presegmented_sentences=segment.get(
+                "sentences"
+            )
         )
 
         # ----------------------------------------------------
@@ -333,10 +344,6 @@ def map_document_positions(
 
         "filename":
             processed_document["filename"],
-
-        # 延續 M02 的格式資訊，避免 Metadata 在模組間遺失。
-        "source_format":
-            processed_document.get("source_format", "JATS"),
 
         "pmcid":
             processed_document["pmcid"],
