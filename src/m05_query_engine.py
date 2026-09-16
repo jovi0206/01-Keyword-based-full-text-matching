@@ -275,14 +275,21 @@ def detect_query_type(query):
 # 5. DOCUMENT HELPERS
 # ============================================================
 
+def resolve_document_id(document):
+    return (
+        document.get("pmcid")
+        or document.get("pmid")
+        or document["filename"]
+    )
+
+
 def build_document_lookup(
     positioned_documents,
 ):
 
     return {
-        (
-            document["pmcid"]
-            or document["filename"]
+        resolve_document_id(
+            document
         ):
             document
 
@@ -497,9 +504,8 @@ def make_result(
 
     return {
         "document_id":
-            (
-                document["pmcid"]
-                or document["filename"]
+            resolve_document_id(
+                document
             ),
 
         "title":

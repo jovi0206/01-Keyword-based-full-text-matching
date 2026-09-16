@@ -129,16 +129,20 @@ def normalize_stats_text(text):
 # 4. DOCUMENT STATISTICS CORPUS NORMALIZATION
 # ============================================================
 #
-# Statistics Corpus 與 Search Corpus 的「範圍」不同，
-# 但兩者使用同一套 Regex tokenizer（WORD_PATTERN）。
+# Statistics Corpus 與 Search Corpus 的「範圍」與「分詞目的」不同。
 #
 # Statistics Corpus:
-#     用於 Characters / Computed Words / Sentences
+#     用於 Characters / Words / Sentences
+#     Words 採 whitespace segmentation（text.split()）。
+#     目的：提供簡單、可重現、接近一般文書軟體的 word count。
 #
 # Search Corpus:
 #     用於 Position Mapping / Inverted Index / Search
+#     仍使用 WORD_PATTERN Regex tokenizer。
+#     目的：保留搜尋所需的 token 邊界與位置。
 #
-# 這樣系統對「什麼是一個 Word」只保留一套定義。
+# 因此 Document Statistics 的 Words 與 Indexed Words
+# 不要求完全相同；兩者用途不同。
 # ============================================================
 
 def normalize_statistics_corpus(text):
@@ -152,7 +156,19 @@ def normalize_statistics_corpus(text):
 
 
 def tokenize_statistics_words(text):
-    """Tokenize Document Statistics with the shared Regex tokenizer."""
+    """Tokenize Document Statistics by whitespace boundaries.
+
+    Important:
+        This function is intentionally independent from the Search
+        Regex tokenizer.  It preserves intra-token punctuation such as
+        hyphens and slashes as long as there is no whitespace boundary.
+
+    Examples:
+        cancer-dementia -> 1 word
+        all-cause       -> 1 word
+        non-melanoma    -> 1 word
+        16%/9%          -> 1 word
+    """
 
     text = normalize_statistics_corpus(
         text
@@ -161,11 +177,7 @@ def tokenize_statistics_words(text):
     if not text:
         return []
 
-    # tokenize_words() is the same Regex tokenizer used by Search.
-    # The function is defined below; Python resolves it when called.
-    return tokenize_words(
-        text
-    )
+    return text.split()
 
 
 # ============================================================
@@ -189,12 +201,14 @@ def tokenize_statistics_words(text):
 
 WORD_PATTERN = re.compile(
 
-    r"\d+(?:[.,]\d+)*(?:%|[A-Za-z]+)?"
+    # Numeric token, including scientific ranges such as:
+    # 2‒3% / 3–5 / 1,000–2,000
+    r"\d+(?:[.,]\d+)*(?:[‐‑‒–—-]\d+(?:[.,]\d+)*)?(?:%|[A-Za-z]+)?"
 
     r"|"
 
     r"[^\W_]+"
-    r"(?:[.'’/‐-‒–—-][^\W_]+)*"
+    r"(?:[.'’/‐‑‒–—-][^\W_]+)*"
     r"%?",
 
     re.UNICODE
@@ -503,6 +517,95 @@ def build_stats_segments(document):
 
 
 # ============================================================
+# 8. PUBMED SENTENCE / EOS HELPERS
+# ============================================================
+#
+# pySBD remains the primary Sentence Boundary Disambiguation engine.
+# PubMed structured abstracts add one extra semantic layer:
+# some AbstractText nodes are identifiers (for example a trial
+# registration number) rather than prose sentences.  Those nodes stay
+# searchable and remain in word/character statistics, but they do not
+# contribute to the prose Sentence Count.
+#
+# We also segment each AbstractText section independently.  This keeps
+# EOS decisions from leaking across structured-abstract section borders.
+# ============================================================
+
+PUBMED_NON_PROSE_LABEL_MARKERS = (
+    "trial registration",
+    "registration number",
+    "clinical trial registration",
+    "trial registration number",
+    "registry number",
+    "prospero",
+)
+
+
+def is_pubmed_sentence_section(section):
+    label = (
+        section.get("label", "")
+        or section.get("raw_label", "")
+        or section.get("nlm_category", "")
+        or ""
+    ).casefold()
+
+    return not any(
+        marker in label
+        for marker in PUBMED_NON_PROSE_LABEL_MARKERS
+    )
+
+
+def get_pubmed_abstract_sections(document):
+    sections = document.get(
+        "abstract_sections",
+        []
+    )
+
+    if sections:
+        return sections
+
+    # Compatibility fallback for PubMed documents created by an older M01.
+    return [
+        {
+            "label": "",
+            "raw_label": "",
+            "nlm_category": "",
+            "text": paragraph,
+        }
+        for paragraph in document.get(
+            "abstract_paragraphs_clean",
+            []
+        )
+        if paragraph
+    ]
+
+
+def segment_pubmed_abstract_sentences(document):
+    sentences = []
+
+    for section in get_pubmed_abstract_sections(
+        document
+    ):
+        if not is_pubmed_sentence_section(
+            section
+        ):
+            continue
+
+        text = section.get(
+            "text",
+            ""
+        )
+
+        sentences.extend(
+            segment_sentences(
+                text
+            )
+        )
+
+    return sentences
+
+
+# ============================================================
 # 8. 建立 SEARCH Segments
 # ============================================================
 #
@@ -533,7 +636,10 @@ def build_search_segments(document):
 
     def add(
         field,
-        text
+        text,
+        label="",
+        nlm_category="",
+        count_sentence=True,
     ):
 
         nonlocal segment_id
@@ -549,8 +655,12 @@ def build_search_segments(document):
             text
         )
 
-        sentences = segment_sentences(
-            text
+        sentences = (
+            segment_sentences(
+                text
+            )
+            if count_sentence
+            else []
         )
 
         segments.append(
@@ -560,6 +670,15 @@ def build_search_segments(document):
 
                 "field":
                     field,
+
+                "label":
+                    label,
+
+                "nlm_category":
+                    nlm_category,
+
+                "sentence_countable":
+                    count_sentence,
 
                 "text":
                     text,
@@ -573,6 +692,32 @@ def build_search_segments(document):
         )
 
         segment_id += 1
+
+    # --------------------------------------------------------
+    # PubMed professor-demo mode
+    # --------------------------------------------------------
+    # For PubMed citation records fetched by PMID, the requested
+    # searchable text scope is the visible Abstract block only.
+    # Metadata (Title / Authors / Journal / DOI / PMID) remains
+    # available for display, but is not mixed into Search Corpus.
+    # --------------------------------------------------------
+
+    if document.get("source_format") == "PubMed":
+
+        for section in get_pubmed_abstract_sections(
+            document
+        ):
+            add(
+                "abstract",
+                section.get("text", ""),
+                label=section.get("label", ""),
+                nlm_category=section.get("nlm_category", ""),
+                count_sentence=is_pubmed_sentence_section(
+                    section
+                ),
+            )
+
+        return segments
 
     # --------------------------------------------------------
     # Metadata
@@ -823,9 +968,14 @@ def process_document(document):
         statistics_text
     )
 
-    statistics_sentences = segment_sentences(
-        statistics_text
-    )
+    if document.get("source_format") == "PubMed":
+        statistics_sentences = segment_pubmed_abstract_sentences(
+            document
+        )
+    else:
+        statistics_sentences = segment_sentences(
+            statistics_text
+        )
 
     # --------------------------------------------------------
     # Search Segments
@@ -857,7 +1007,9 @@ def process_document(document):
     #
     # Computed Words:
     #     本系統依 statistics_text
-    #     使用與 Search 相同的 Regex tokenizer 計算。
+    #     使用 whitespace segmentation（text.split()）計算。
+    #
+    # Search Corpus 仍使用 Regex tokenizer；兩者用途分開。
     #
     # Reported Words:
     #     JATS XML <word-count> 提供的來源數字。
@@ -904,10 +1056,37 @@ def process_document(document):
             ),
 
         "pmcid":
-            document["pmcid"],
+            document.get("pmcid", ""),
+
+        "pmid":
+            document.get("pmid", ""),
+
+        "doi":
+            document.get("doi", ""),
+
+        "journal":
+            document.get("journal", ""),
+
+        "authors":
+            document.get("authors", []),
+
+        "affiliations":
+            document.get("affiliations", []),
+
+        "keywords":
+            document.get("keywords", []),
+
+        "article_type":
+            document.get("article_type", ""),
 
         "title":
             document["title"],
+
+        "abstract":
+            document.get("abstract", ""),
+
+        "abstract_sections":
+            document.get("abstract_sections", []),
 
         # ---------------------------------------------
         # Document Statistics
@@ -952,10 +1131,14 @@ def process_document(document):
             ),
 
         "statistics_word_method":
-            "Regex tokenizer",
+            "Whitespace segmentation",
 
         "statistics_sentence_method":
-            "pySBD sentence segmentation",
+            (
+                "pySBD + PubMed section-aware EOS filtering"
+                if document.get("source_format") == "PubMed"
+                else "pySBD sentence segmentation"
+            ),
 
         # ---------------------------------------------
         # Token / Sentence Lists
@@ -1000,6 +1183,65 @@ def process_document(document):
     }
 
     return processed_document
+
+
+# ============================================================
+# 10. SENTENCE BOUNDARY DIAGNOSTICS
+# ============================================================
+#
+# These examples are intentionally kept as diagnostics rather than
+# hard-coded replacement rules.  pySBD remains the sentence boundary
+# algorithm; this helper lets us demonstrate how ambiguous periods are
+# segmented in class (abbreviation, initial, decimal, unit, etc.).
+# ============================================================
+
+SENTENCE_BOUNDARY_DIAGNOSTIC_CASES = [
+    {
+        "name": "title_abbreviation",
+        "text": "Dr. Smith treated the patient. The patient recovered.",
+        "expected_sentences": 2,
+    },
+    {
+        "name": "name_initial",
+        "text": "My name is Jonas E. Smith. He works here.",
+        "expected_sentences": 2,
+    },
+    {
+        "name": "decimal",
+        "text": "The value was 9.6. Measurements were repeated.",
+        "expected_sentences": 2,
+    },
+    {
+        "name": "temperature_unit",
+        "text": "The temperature was 37 °C. The patient was stable.",
+        "expected_sentences": 2,
+    },
+    {
+        "name": "country_abbreviation",
+        "text": "The study was conducted in the U.S. Results were consistent.",
+        "expected_sentences": 2,
+    },
+]
+
+
+def sentence_boundary_diagnostics():
+    results = []
+
+    for case in SENTENCE_BOUNDARY_DIAGNOSTIC_CASES:
+        sentences = segment_sentences(
+            case["text"]
+        )
+
+        results.append(
+            {
+                **case,
+                "actual_sentences": len(sentences),
+                "pass": len(sentences) == case["expected_sentences"],
+                "sentences": sentences,
+            }
+        )
+
+    return results
 
 
 # ============================================================

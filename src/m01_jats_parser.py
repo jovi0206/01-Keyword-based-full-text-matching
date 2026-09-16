@@ -1,5 +1,7 @@
 from pathlib import Path
 import re
+import urllib.parse
+import urllib.request
 import xml.etree.ElementTree as ET
 
 
@@ -1616,6 +1618,24 @@ def detect_xml_format(
     root = tree.getroot()
 
     # --------------------------------------------------------
+    # PubMed XML
+    # --------------------------------------------------------
+    # EFetch(db=pubmed, retmode=xml) returns PubmedArticleSet.
+    # A saved single record may also use PubmedArticle as root.
+    # --------------------------------------------------------
+
+    root_name = local_name(root)
+
+    if root_name == "PubmedArticleSet":
+        return "PubMed"
+
+    if (
+        root_name == "PubmedArticle"
+        and root.find("./{*}MedlineCitation") is not None
+    ):
+        return "PubMed"
+
+    # --------------------------------------------------------
     # JATS
     # --------------------------------------------------------
     #
@@ -3041,6 +3061,618 @@ def parse_generic_xml(
 
 
 # ============================================================
+# 19. PubMed / PMID INPUT
+# ============================================================
+#
+# Professor demo path:
+#
+# README.txt
+#     ↓
+# PMID
+#     ↓
+# NCBI EFetch (db=pubmed, retmode=xml)
+#     ↓
+# PubMed XML
+#     ↓
+# Structured Document
+#
+# PubMed mode in this project intentionally uses Abstract as the
+# Statistics Corpus and Search Corpus.  Title / Authors / Journal /
+# DOI are retained as metadata for display, but are not mixed into
+# the Abstract text statistics/search scope.
+# ============================================================
+
+PUBMED_EFETCH_URL = (
+    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+)
+
+
+def extract_pmids_from_text(text):
+    """Extract PMIDs from a README-style text file.
+
+    Supported examples:
+        PMID: 12345678
+        PMID 12345678
+        https://pubmed.ncbi.nlm.nih.gov/12345678/
+        12345678          (standalone line)
+
+    Duplicates are removed while preserving the original order.
+    """
+
+    if not text:
+        return []
+
+    candidates = []
+
+    # Explicit PMID labels are the strongest signal.
+    candidates.extend(
+        re.findall(
+            r"(?i)\bPMID\s*[:#=]?\s*(\d+)\b",
+            text,
+        )
+    )
+
+    # PubMed URLs inside README files.
+    candidates.extend(
+        re.findall(
+            r"(?i)pubmed\.ncbi\.nlm\.nih\.gov/(\d+)",
+            text,
+        )
+    )
+
+    # Standalone numeric lines are common in classroom README files.
+    for line in text.splitlines():
+        stripped = line.strip().strip(",;")
+        if re.fullmatch(r"\d+", stripped):
+            candidates.append(stripped)
+
+    # If the file is just a compact comma/space-separated PMID list,
+    # accept numeric tokens of realistic PMID length as a fallback.
+    if not candidates:
+        candidates.extend(
+            re.findall(r"\b\d{5,10}\b", text)
+        )
+
+    pmids = []
+    seen = set()
+
+    for value in candidates:
+        pmid = value.strip()
+        if not pmid or pmid in seen:
+            continue
+        seen.add(pmid)
+        pmids.append(pmid)
+
+    return pmids
+
+
+def read_pmids_from_readme(readme_file):
+    """Read a local README.txt and return PMIDs."""
+
+    path = Path(readme_file)
+    text = path.read_text(
+        encoding="utf-8-sig",
+        errors="replace",
+    )
+
+    return extract_pmids_from_text(text)
+
+
+def fetch_pubmed_xml(pmids, timeout=30):
+    """Fetch PubMed records as XML using the official NCBI EFetch API."""
+
+    cleaned_pmids = []
+
+    for pmid in pmids:
+        value = str(pmid).strip()
+        if not re.fullmatch(r"\d+", value):
+            raise ValueError(
+                f"Invalid PMID: {pmid}"
+            )
+        cleaned_pmids.append(value)
+
+    if not cleaned_pmids:
+        raise ValueError(
+            "No PMID found in README.txt."
+        )
+
+    params = urllib.parse.urlencode(
+        {
+            "db": "pubmed",
+            "id": ",".join(cleaned_pmids),
+            "retmode": "xml",
+            "tool": "keyword_full_text_matching",
+        }
+    )
+
+    request = urllib.request.Request(
+        f"{PUBMED_EFETCH_URL}?{params}",
+        headers={
+            "User-Agent": (
+                "KeywordFullTextMatching/1.0 "
+                "(educational project)"
+            )
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=timeout,
+        ) as response:
+            return response.read()
+
+    except Exception as error:
+        raise RuntimeError(
+            "Unable to fetch PubMed records from NCBI EFetch: "
+            f"{error}"
+        ) from error
+
+
+def _pubmed_text(element):
+    """Visible text of a PubMed XML element, preserving inline markup text."""
+
+    if element is None:
+        return ""
+
+    return normalize_inline_text(
+        " ".join(
+            part
+            for part in element.itertext()
+            if part
+        )
+    )
+
+
+def _pubmed_article_ids(pubmed_article):
+    ids = {}
+
+    for element in pubmed_article.findall(
+        "./{*}PubmedData/{*}ArticleIdList/{*}ArticleId"
+    ):
+        id_type = (
+            element.get("IdType", "")
+            .strip()
+            .lower()
+        )
+        value = _pubmed_text(element)
+        if id_type and value:
+            ids[id_type] = value
+
+    return ids
+
+
+def _pubmed_authors(article):
+    authors = []
+
+    for author in article.findall(
+        "./{*}AuthorList/{*}Author"
+    ):
+        collective = _pubmed_text(
+            author.find("./{*}CollectiveName")
+        )
+
+        if collective:
+            full_name = collective
+        else:
+            surname = _pubmed_text(
+                author.find("./{*}LastName")
+            )
+            given = _pubmed_text(
+                author.find("./{*}ForeName")
+            )
+            if not given:
+                given = _pubmed_text(
+                    author.find("./{*}Initials")
+                )
+
+            full_name = (
+                f"{given} {surname}"
+            ).strip()
+
+        if full_name and full_name not in authors:
+            authors.append(full_name)
+
+    return authors
+
+
+def _pubmed_affiliations(article):
+    affiliations = []
+
+    for element in article.findall(
+        ".//{*}AffiliationInfo/{*}Affiliation"
+    ):
+        text = _pubmed_text(element)
+        if text and text not in affiliations:
+            affiliations.append(text)
+
+    return affiliations
+
+
+def _pubmed_keywords(medline_citation):
+    keywords = []
+
+    for element in medline_citation.findall(
+        "./{*}KeywordList/{*}Keyword"
+    ):
+        text = _pubmed_text(element)
+        if text and text not in keywords:
+            keywords.append(text)
+
+    return keywords
+
+
+def _pubmed_display_label(label):
+    """Convert PubMed structured-abstract labels to readable UI text."""
+
+    label = normalize_inline_text(
+        (label or "").replace("_", " ")
+    )
+
+    if not label:
+        return ""
+
+    # NLM may use technical placeholders when no meaningful heading exists.
+    if label.upper() in {
+        "UNASSIGNED",
+        "UNLABELLED",
+        "UNLABELED",
+    }:
+        return ""
+
+    if label.isupper():
+        return label.title()
+
+    return label
+
+
+def _pubmed_abstract(article):
+    """Return labels, paragraphs, and paired structured-abstract sections.
+
+    PubMed structured abstracts store headings in attributes such as:
+
+        <AbstractText Label="BACKGROUND">...</AbstractText>
+
+    The previous parser kept the text but lost the label-to-text pairing.
+    This version preserves that structure for later UI rendering while the
+    label itself is NOT mixed into the Abstract statistics/search corpus.
+    """
+
+    section_titles = []
+    paragraphs = []
+    sections = []
+
+    abstract = article.find(
+        "./{*}Abstract"
+    )
+
+    if abstract is None:
+        return section_titles, paragraphs, sections
+
+    for abstract_text in abstract.findall(
+        "./{*}AbstractText"
+    ):
+        xml_label = (
+            abstract_text.get("Label", "")
+            or ""
+        ).strip()
+
+        nlm_category = (
+            abstract_text.get("NlmCategory", "")
+            or ""
+        ).strip()
+
+        raw_label = xml_label or nlm_category
+        display_label = _pubmed_display_label(
+            raw_label
+        )
+
+        text = _pubmed_text(
+            abstract_text
+        )
+
+        if not text:
+            continue
+
+        if display_label:
+            section_titles.append(
+                display_label
+            )
+
+        paragraphs.append(
+            text
+        )
+
+        sections.append(
+            {
+                "label": display_label,
+                "raw_label": raw_label,
+                "nlm_category": nlm_category,
+                "text": text,
+            }
+        )
+
+    return section_titles, paragraphs, sections
+
+
+def parse_pubmed_article_element(
+    pubmed_article,
+    source_name="PubMed EFetch",
+):
+    """Convert one <PubmedArticle> into the project's Structured Document."""
+
+    medline_citation = pubmed_article.find(
+        "./{*}MedlineCitation"
+    )
+
+    if medline_citation is None:
+        raise ValueError(
+            "PubMed record has no <MedlineCitation>."
+        )
+
+    article = medline_citation.find(
+        "./{*}Article"
+    )
+
+    if article is None:
+        raise ValueError(
+            "PubMed record has no <Article>."
+        )
+
+    pmid = _pubmed_text(
+        medline_citation.find("./{*}PMID")
+    )
+
+    if not pmid:
+        raise ValueError(
+            "PubMed record has no PMID."
+        )
+
+    article_ids = _pubmed_article_ids(
+        pubmed_article
+    )
+
+    pmcid = article_ids.get(
+        "pmc",
+        "",
+    )
+
+    doi = article_ids.get(
+        "doi",
+        "",
+    )
+
+    if not doi:
+        for location_id in article.findall(
+            "./{*}ELocationID"
+        ):
+            if (
+                location_id.get("EIdType", "")
+                .strip()
+                .lower()
+                == "doi"
+            ):
+                doi = _pubmed_text(location_id)
+                break
+
+    title = _pubmed_text(
+        article.find("./{*}ArticleTitle")
+    )
+
+    journal = _pubmed_text(
+        article.find("./{*}Journal/{*}Title")
+    )
+
+    authors = _pubmed_authors(article)
+    affiliations = _pubmed_affiliations(article)
+    keywords = _pubmed_keywords(medline_citation)
+
+    publication_types = [
+        _pubmed_text(element)
+        for element in article.findall(
+            "./{*}PublicationTypeList/{*}PublicationType"
+        )
+        if _pubmed_text(element)
+    ]
+
+    (
+        abstract_section_titles,
+        abstract_paragraphs,
+        abstract_sections,
+    ) = _pubmed_abstract(article)
+
+    abstract_text = normalize_statistics_text(
+        " ".join(abstract_paragraphs)
+    )
+
+    # Professor's PubMed demo scope:
+    # only the visible Abstract text block enters Statistics/Search.
+    document = {
+        "filename": f"PMID_{pmid}.xml",
+        "source_name": source_name,
+        "source_format": "PubMed",
+        "article_type": (
+            "; ".join(publication_types)
+            if publication_types
+            else "pubmed"
+        ),
+        "pmcid": pmcid,
+        "pmid": pmid,
+        "doi": doi,
+        "journal": journal,
+        "title": title,
+        "authors": authors,
+        "affiliations": affiliations,
+        "keywords": keywords,
+
+        "abstract_section_titles": abstract_section_titles,
+        "abstract_sections": abstract_sections,
+        "abstract_paragraphs": abstract_paragraphs,
+        "abstract_paragraphs_clean": abstract_paragraphs.copy(),
+        "abstract": abstract_text,
+        "abstract_clean": abstract_text,
+
+        # PubMed citation records do not provide PMC full-text body here.
+        "section_titles": [],
+        "body_paragraphs": [],
+        "body_paragraphs_clean": [],
+        "body": "",
+        "body_clean": "",
+        "definitions": [],
+        "figures": [],
+        "tables": [],
+        "acknowledgments": [],
+        "references": [],
+
+        # Statistics Corpus = Abstract only.
+        "statistics_front_text": "",
+        "statistics_body_text": abstract_text,
+        "statistics_back_text": "",
+        "statistics_text": abstract_text,
+        "statistics_scope": "PubMed Abstract only",
+
+        # PubMed citation XML does not provide JATS article counts.
+        "reported_word_count": None,
+        "reported_figure_count": None,
+        "reported_table_count": None,
+        "reported_ref_count": None,
+        "reported_page_count": None,
+    }
+
+    return document
+
+
+def parse_pubmed_xml_bytes(
+    xml_bytes,
+    source_name="PubMed EFetch",
+):
+    """Parse one or more PubMed records returned by EFetch."""
+
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError as error:
+        raise ValueError(
+            f"Invalid PubMed XML: {error}"
+        ) from error
+
+    if local_name(root) == "PubmedArticle":
+        article_elements = [root]
+    else:
+        article_elements = root.findall(
+            "./{*}PubmedArticle"
+        )
+
+        if not article_elements:
+            article_elements = root.findall(
+                ".//{*}PubmedArticle"
+            )
+
+    if not article_elements:
+        raise ValueError(
+            "No <PubmedArticle> record found in PubMed XML."
+        )
+
+    return [
+        parse_pubmed_article_element(
+            element,
+            source_name=source_name,
+        )
+        for element in article_elements
+    ]
+
+
+def parse_pubmed_file(xml_file):
+    """Parse a saved PubMed XML file containing exactly one article."""
+
+    path = Path(xml_file)
+    documents = parse_pubmed_xml_bytes(
+        path.read_bytes(),
+        source_name=path.name,
+    )
+
+    if len(documents) != 1:
+        raise ValueError(
+            "PubMed XML contains multiple articles. "
+            "Use README/PMID batch loading for multiple records."
+        )
+
+    return documents[0]
+
+
+def fetch_pubmed_documents(
+    pmids,
+    timeout=30,
+    source_name="README.txt",
+):
+    """Fetch PMIDs and return (documents, missing_pmids)."""
+
+    requested = []
+    seen = set()
+
+    for value in pmids:
+        pmid = str(value).strip()
+        if not re.fullmatch(r"\d+", pmid):
+            raise ValueError(
+                f"Invalid PMID: {value}"
+            )
+        if pmid not in seen:
+            seen.add(pmid)
+            requested.append(pmid)
+
+    xml_bytes = fetch_pubmed_xml(
+        requested,
+        timeout=timeout,
+    )
+
+    documents = parse_pubmed_xml_bytes(
+        xml_bytes,
+        source_name=source_name,
+    )
+
+    by_pmid = {
+        document["pmid"]: document
+        for document in documents
+    }
+
+    ordered_documents = [
+        by_pmid[pmid]
+        for pmid in requested
+        if pmid in by_pmid
+    ]
+
+    missing_pmids = [
+        pmid
+        for pmid in requested
+        if pmid not in by_pmid
+    ]
+
+    return ordered_documents, missing_pmids
+
+
+def load_pubmed_documents_from_readme_text(
+    readme_text,
+    timeout=30,
+    source_name="README.txt",
+):
+    """README text → PMID list → PubMed records → Structured Documents."""
+
+    pmids = extract_pmids_from_text(
+        readme_text
+    )
+
+    if not pmids:
+        raise ValueError(
+            "README.txt does not contain a recognizable PMID."
+        )
+
+    return fetch_pubmed_documents(
+        pmids,
+        timeout=timeout,
+        source_name=source_name,
+    )
+
+
+# ============================================================
 # 19. 對外統一入口
 # ============================================================
 #
@@ -3065,6 +3697,12 @@ def parse_jats(
     xml_format = detect_xml_format(
         xml_file
     )
+
+    if xml_format == "PubMed":
+
+        return parse_pubmed_file(
+            xml_file
+        )
 
     if xml_format == "JATS":
 

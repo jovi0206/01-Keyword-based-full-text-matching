@@ -293,6 +293,15 @@ def map_document_positions(
                 "field":
                     segment["field"],
 
+                "label":
+                    segment.get("label", ""),
+
+                "nlm_category":
+                    segment.get("nlm_category", ""),
+
+                "sentence_countable":
+                    segment.get("sentence_countable", True),
+
                 "text":
                     text,
 
@@ -345,11 +354,44 @@ def map_document_positions(
         "filename":
             processed_document["filename"],
 
+        "source_format":
+            processed_document.get(
+                "source_format",
+                "Unknown"
+            ),
+
         "pmcid":
-            processed_document["pmcid"],
+            processed_document.get("pmcid", ""),
+
+        "pmid":
+            processed_document.get("pmid", ""),
+
+        "doi":
+            processed_document.get("doi", ""),
+
+        "journal":
+            processed_document.get("journal", ""),
+
+        "authors":
+            processed_document.get("authors", []),
+
+        "affiliations":
+            processed_document.get("affiliations", []),
+
+        "keywords":
+            processed_document.get("keywords", []),
+
+        "article_type":
+            processed_document.get("article_type", ""),
 
         "title":
             processed_document["title"],
+
+        "abstract":
+            processed_document.get("abstract", ""),
+
+        "abstract_sections":
+            processed_document.get("abstract_sections", []),
 
         "search_text":
             processed_document["search_text"],

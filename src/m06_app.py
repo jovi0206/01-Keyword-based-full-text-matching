@@ -6,7 +6,10 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
-from m01_jats_parser import parse_jats
+from m01_jats_parser import (
+    parse_jats,
+    load_pubmed_documents_from_readme_text,
+)
 from m02_text_processor import process_document
 from m03_position_mapper import map_document_positions
 from m04_index_builder import build_index
@@ -17,9 +20,8 @@ from m05_query_engine import search_query
 # MODULE 06 — STREAMLIT WEB APP V2
 # ============================================================
 # UX:
-# Upload XML → Build Index → Search Summary → Document Cards
-# → Open Article → All / Exact / Related
-# → Previous / Next Match → Position Details
+# Single Upload (TXT/XML auto-detect) → Build Index → Sticky Search
+# → Search Summary → Inline Article Results with Match Highlighting
 #
 # M01 ~ M05 interfaces are unchanged.
 # M06 isolates per-file failures during upload/build.
@@ -30,6 +32,10 @@ st.set_page_config(
     page_icon="🔎",
     layout="wide",
 )
+
+
+# UI feature switches. Set to True if the selected-file detail panel is needed later.
+SHOW_SELECTED_FILES_DETAILS = False
 
 
 # ============================================================
@@ -72,8 +78,8 @@ st.markdown(
 
         /* ---------- 01 Index KPI：Documents / Indexed Words / Unique Terms ---------- */
         --kfm-index-max-width: 580px;
-        --kfm-index-min-height: 300px;
-        --kfm-index-padding-y: 26px;
+        --kfm-index-min-height: 190px;
+        --kfm-index-padding-y: 14px;
         --kfm-index-padding-x: 22px;
         --kfm-index-radius: 22px;
         --kfm-index-label-size: 2.02rem;
@@ -82,16 +88,16 @@ st.markdown(
 
         /* ---------- 02 Search Summary：四張 KPI ---------- */
         --kfm-summary-max-width: 400px;
-        --kfm-summary-min-height: 320px;
-        --kfm-summary-padding-y: 24px;
+        --kfm-summary-min-height: 190px;
+        --kfm-summary-padding-y: 14px;
         --kfm-summary-padding-x: 18px;
         --kfm-summary-radius: 22px;
         --kfm-summary-label-size: 2.02rem;
         --kfm-summary-value-size: 3.55rem;
 
         /* ---------- 每篇 Search Result：Exact / Related / Total ---------- */
-        --kfm-result-min-height: 104px;
-        --kfm-result-padding-y: 14px;
+        --kfm-result-min-height: 82px;
+        --kfm-result-padding-y: 9px;
         --kfm-result-padding-x: 16px;
         --kfm-result-radius: 15px;
         --kfm-result-label-size: 0.76rem;
@@ -101,6 +107,7 @@ st.markdown(
         --kfm-search-height: 52px;
         --kfm-search-font-size: 1.12rem;
         --kfm-search-button-font-size: 1.05rem;
+        --kfm-search-radius: 999px;
     }
 
 
@@ -353,34 +360,64 @@ st.markdown(
     div[data-testid="stForm"] {
         background: var(--kfm-moss);
         border: 0;
-        border-radius: 999px;
+        border-radius: var(--kfm-search-radius);
         padding: 10px 14px 4px 14px;
         box-shadow: 0 8px 20px rgba(46, 64, 49, 0.16);
     }
 
+    /* Search controls: force TextInput / Selectbox / button to the exact same height and pill radius. */
+    div[data-testid="stForm"] [data-testid="stTextInput"],
+    div[data-testid="stForm"] [data-testid="stSelectbox"],
+    div[data-testid="stForm"] .stFormSubmitButton {
+        min-height: var(--kfm-search-height) !important;
+        height: var(--kfm-search-height) !important;
+    }
+
+    /* Streamlit/BaseWeb wraps TextInput in extra layers; size those layers too. */
+    div[data-testid="stForm"] [data-testid="stTextInput"] > div,
+    div[data-testid="stForm"] [data-testid="stTextInput"] > div > div,
+    div[data-testid="stForm"] [data-testid="stTextInput"] [data-baseweb="input"],
+    div[data-testid="stForm"] [data-testid="stTextInput"] [data-baseweb="base-input"] {
+        min-height: var(--kfm-search-height) !important;
+        height: var(--kfm-search-height) !important;
+        border-radius: var(--kfm-search-radius) !important;
+        overflow: hidden !important;
+        box-sizing: border-box !important;
+    }
+
     div[data-testid="stForm"] [data-testid="stTextInput"] input {
-        min-height: var(--kfm-search-height);
-        border-radius: 999px !important;
+        min-height: var(--kfm-search-height) !important;
+        height: var(--kfm-search-height) !important;
+        border-radius: var(--kfm-search-radius) !important;
         border: 0 !important;
         background: var(--kfm-linen) !important;
         color: var(--kfm-ink) !important;
         font-size: var(--kfm-search-font-size) !important;
-        padding-left: 20px !important;
+        padding: 0 20px !important;
+        box-sizing: border-box !important;
     }
 
-    div[data-testid="stForm"] [data-testid="stSelectbox"] > div > div {
-        min-height: var(--kfm-search-height);
-        border-radius: 999px !important;
+    div[data-testid="stForm"] [data-testid="stSelectbox"] > div,
+    div[data-testid="stForm"] [data-testid="stSelectbox"] > div > div,
+    div[data-testid="stForm"] [data-testid="stSelectbox"] [data-baseweb="select"],
+    div[data-testid="stForm"] [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        min-height: var(--kfm-search-height) !important;
+        height: var(--kfm-search-height) !important;
+        border-radius: var(--kfm-search-radius) !important;
+        overflow: hidden !important;
         border: 0 !important;
         background: #FFFFFF !important;
         color: var(--kfm-ink) !important;
+        box-sizing: border-box !important;
     }
 
     div[data-testid="stForm"] .stFormSubmitButton > button {
         min-height: var(--kfm-search-height) !important;
-        border-radius: 999px !important;
+        height: var(--kfm-search-height) !important;
+        border-radius: var(--kfm-search-radius) !important;
         font-size: var(--kfm-search-button-font-size) !important;
         box-shadow: none !important;
+        box-sizing: border-box !important;
     }
 
     .kfm-search-help {
@@ -542,6 +579,162 @@ st.markdown(
         border-radius: 3px;
         padding: 0 2px;
         font-weight: 850;
+    }
+
+    /* One compact analysis row per result.
+       Match cards remain visually dominant; document statistics are muted. */
+    .kfm-result-metrics-grid {
+        display: grid;
+        grid-template-columns:
+            minmax(138px, 1.22fr)
+            minmax(138px, 1.22fr)
+            minmax(138px, 1.22fr)
+            minmax(112px, 0.88fr)
+            minmax(112px, 0.88fr)
+            minmax(96px, 0.74fr)
+            minmax(96px, 0.74fr);
+        gap: 10px;
+        margin: 8px 0 10px 0;
+        align-items: stretch;
+    }
+
+    .kfm-result-main-card,
+    .kfm-result-stat-card {
+        border-radius: 13px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-width: 0;
+    }
+
+    .kfm-result-main-card {
+        background: #FFFFFF;
+        border: 1px solid var(--kfm-border);
+        border-top: 5px solid var(--kfm-moss);
+        min-height: 78px;
+        padding: 10px 13px;
+        box-shadow: 0 4px 11px rgba(28, 35, 33, 0.045);
+    }
+
+    .kfm-result-main-card.exact {
+        border-top-color: var(--kfm-exact-border);
+        background: var(--kfm-exact-bg);
+    }
+
+    .kfm-result-main-label {
+        color: var(--kfm-muted);
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        margin-bottom: 3px;
+        white-space: nowrap;
+    }
+
+    .kfm-result-main-value {
+        color: var(--kfm-ink);
+        font-size: 1.85rem;
+        line-height: 1;
+        font-weight: 850;
+    }
+
+    .kfm-result-stat-card {
+        background: #F5F7F2;
+        border: 1px solid #E0E5DC;
+        min-height: 68px;
+        padding: 9px 11px;
+        box-shadow: none;
+    }
+
+    .kfm-result-stat-label {
+        color: #748078;
+        font-size: 0.64rem;
+        line-height: 1.18;
+        font-weight: 750;
+        margin-bottom: 4px;
+    }
+
+    .kfm-result-stat-value {
+        color: #526057;
+        font-size: 1.18rem;
+        line-height: 1;
+        font-weight: 780;
+    }
+
+    @media (max-width: 1450px) {
+        .kfm-result-metrics-grid {
+            grid-template-columns: repeat(3, minmax(150px, 1fr));
+        }
+
+        .kfm-result-stat-card {
+            min-height: 58px;
+        }
+    }
+
+    /* ========================================================
+       STICKY MAIN SEARCH BAR
+       The professor can scroll through all six results and enter
+       another query without returning to the top of the page.
+       ======================================================== */
+    .st-key-search_form {
+        position: sticky;
+        top: 3.35rem;
+        z-index: 9990;
+        background: rgba(244, 246, 240, 0.97);
+        padding: 8px 0 6px 0;
+        margin: -8px 0 4px 0;
+        backdrop-filter: blur(7px);
+    }
+
+    /* ========================================================
+       INLINE ARTICLE IN SEARCH RESULTS
+       ======================================================== */
+    .kfm-inline-article {
+        margin: 14px 0 2px 0;
+        padding: 16px 18px 15px 18px;
+        background: #FFFFFF;
+        border: 1px solid var(--kfm-border);
+        border-radius: 12px;
+        color: var(--kfm-ink);
+    }
+
+    .kfm-inline-heading {
+        color: var(--kfm-forest);
+        font-size: 1.18rem;
+        font-weight: 900;
+        margin: 0 0 10px 0;
+        padding-bottom: 7px;
+        border-bottom: 1px solid var(--kfm-border);
+    }
+
+    .kfm-inline-group-heading {
+        color: var(--kfm-forest);
+        font-size: 1.08rem;
+        font-weight: 850;
+        margin: 18px 0 8px 0;
+    }
+
+    .kfm-inline-paragraph {
+        margin: 8px 0 10px 0;
+        line-height: 1.72;
+        font-size: 1.02rem;
+    }
+
+    .kfm-inline-label {
+        font-weight: 900;
+        color: var(--kfm-ink);
+    }
+
+    .kfm-inline-article .match.exact {
+        font-weight: 900;
+        background: var(--kfm-soft);
+        border-radius: 3px;
+        padding: 0 2px;
+    }
+
+    .kfm-inline-article .match.related {
+        font-weight: 850;
+        text-decoration: underline dotted var(--kfm-forest);
+        text-underline-offset: 3px;
     }
 
 
@@ -811,16 +1004,16 @@ def render_hero():
     st.markdown(
         """
         <div class="kfm-hero">
-            <div class="kfm-hero-kicker">Biomedical Information Retrieval</div>
-            <div class="kfm-hero-title">Keyword-based Full-Text Matching</div>
+            <div class="kfm-hero-kicker">Artificial Intelligence Information Retrieval</div>
+            <div class="kfm-hero-title">MATCH</div>
             <div class="kfm-flow">
-                <span class="kfm-flow-step">Upload XML</span>
+                <span class="kfm-flow-step">Upload Files</span>
                 <span class="kfm-flow-arrow">→</span>
                 <span class="kfm-flow-step">Build Index</span>
                 <span class="kfm-flow-arrow">→</span>
                 <span class="kfm-flow-step">Search</span>
                 <span class="kfm-flow-arrow">→</span>
-                <span class="kfm-flow-step">Open Article</span>
+                <span class="kfm-flow-step">Review Results</span>
                 <span class="kfm-flow-arrow">→</span>
                 <span class="kfm-flow-step">Locate Match</span>
             </div>
@@ -893,6 +1086,66 @@ def render_result_kpi(label, value, card_class=""):
     )
 
 
+def render_result_metrics_grid(
+    exact_count,
+    related_count,
+    total_count,
+    stats_document,
+):
+    """Render match metrics prominently and document analysis as muted cards."""
+
+    def main_card(label, value, card_class=""):
+        return (
+            f'<div class="kfm-result-main-card {card_class}">'
+            f'<div class="kfm-result-main-label">{html.escape(str(label))}</div>'
+            f'<div class="kfm-result-main-value">{html.escape(str(value))}</div>'
+            '</div>'
+        )
+
+    def stat_card(label, value):
+        return (
+            '<div class="kfm-result-stat-card">'
+            f'<div class="kfm-result-stat-label">{html.escape(str(label))}</div>'
+            f'<div class="kfm-result-stat-value">{html.escape(str(value))}</div>'
+            '</div>'
+        )
+
+    cards = [
+        main_card("Exact Matches", exact_count, "exact"),
+        main_card("Related Matches", related_count),
+        main_card("Total Matches", total_count),
+    ]
+
+    if stats_document:
+        cards.extend(
+            [
+                stat_card(
+                    "Characters\n(with spaces)",
+                    f"{stats_document['character_count']:,}",
+                ),
+                stat_card(
+                    "Characters\n(without spaces)",
+                    f"{stats_document['character_count_without_spaces']:,}",
+                ),
+                stat_card(
+                    "Words",
+                    f"{stats_document['computed_word_count']:,}",
+                ),
+                stat_card(
+                    "Sentences",
+                    f"{stats_document['sentence_count']:,}",
+                ),
+            ]
+        )
+
+    st.markdown(
+        '<div class="kfm-result-metrics-grid">'
+        + "".join(cards)
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_build_status(loaded_count, skipped_count):
     skipped_text = (
         f"{skipped_count} skipped"
@@ -913,18 +1166,42 @@ def render_build_status(loaded_count, skipped_count):
     )
 
 
-def uploaded_signature(uploaded_files):
-    if not uploaded_files:
-        return tuple()
+def input_signature(input_files):
+    """Track the current single-uploader selection for rebuild warnings."""
 
     return tuple(
-        (uploaded_file.name, uploaded_file.size)
-        for uploaded_file in uploaded_files
+        (
+            uploaded_file.name,
+            uploaded_file.size,
+        )
+        for uploaded_file in (input_files or [])
     )
 
 
+def detect_uploaded_input_type(uploaded_file):
+    """Detect XML vs PMID text from file content, with extension fallback."""
+
+    raw = uploaded_file.getvalue()
+    stripped = raw.lstrip(b"\xef\xbb\xbf \t\r\n")
+
+    # XML declaration / root element.
+    if stripped.startswith(b"<"):
+        return "xml"
+
+    suffix = Path(uploaded_file.name).suffix.lower()
+
+    if suffix == ".xml":
+        return "xml"
+
+    return "pmid_text"
+
+
 def get_document_id(document):
-    return document["pmcid"] or document["filename"]
+    return (
+        document.get("pmcid")
+        or document.get("pmid")
+        or document["filename"]
+    )
 
 
 def build_positioned_document_lookup(positioned_documents):
@@ -934,67 +1211,112 @@ def build_positioned_document_lookup(positioned_documents):
     }
 
 
+def build_processed_document_lookup(processed_documents):
+    return {
+        get_document_id(document): document
+        for document in processed_documents
+    }
+
+
 # ============================================================
 # M01 → M04 BUILD PIPELINE
 # ============================================================
 
-def build_uploaded_documents(uploaded_files):
+def build_input_documents(input_files):
+    """Build one index from a mixed TXT/XML upload with auto detection."""
+
     processed_documents = []
     positioned_documents = []
     errors = []
-
-    # 防止兩個檔案最後得到同一個 document_id。
-    # 例如同一篇文章同時上傳 JATS / BioC，
-    # 或兩個 Generic XML 使用相同檔名。
     accepted_document_ids = set()
+
+    def accept_document(document):
+        # M02
+        processed = process_document(document)
+
+        # M03
+        positioned = map_document_positions(processed)
+
+        document_id = get_document_id(positioned)
+
+        if document_id in accepted_document_ids:
+            raise ValueError(
+                "Duplicate document ID detected: "
+                f"{document_id}"
+            )
+
+        accepted_document_ids.add(document_id)
+        processed_documents.append(processed)
+        positioned_documents.append(positioned)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_root = Path(temp_dir)
 
-        for file_number, uploaded_file in enumerate(uploaded_files, start=1):
+        for file_number, uploaded_file in enumerate(
+            input_files or [],
+            start=1,
+        ):
             try:
-                safe_name = Path(uploaded_file.name).name
-
-                file_folder = temp_root / f"{file_number:03d}"
-                file_folder.mkdir(parents=True, exist_ok=True)
-
-                xml_path = file_folder / safe_name
-                xml_path.write_bytes(uploaded_file.getvalue())
+                input_type = detect_uploaded_input_type(uploaded_file)
 
                 # ------------------------------------------------
-                # 單檔錯誤隔離：
-                # 每一個 XML 都在自己的 try / except 中處理。
-                #
-                # 某一個檔案若：
-                # - XML 損壞
-                # - Parser 失敗
-                # - Text Processing 失敗
-                # - Position Mapping 失敗
-                #
-                # 只跳過該檔案，不影響其他正常檔案。
+                # XML → M01 auto detector → JATS / BioC /
+                # PubMed XML / Generic XML
                 # ------------------------------------------------
+                if input_type == "xml":
+                    safe_name = Path(uploaded_file.name).name
+                    file_folder = temp_root / f"{file_number:03d}"
+                    file_folder.mkdir(parents=True, exist_ok=True)
 
-                # M01
-                document = parse_jats(xml_path)
+                    xml_path = file_folder / safe_name
+                    xml_path.write_bytes(uploaded_file.getvalue())
 
-                # M02
-                processed = process_document(document)
+                    document = parse_jats(xml_path)
+                    accept_document(document)
+                    continue
 
-                # M03
-                positioned = map_document_positions(processed)
+                # ------------------------------------------------
+                # Text → PMID list → PubMed EFetch → PubMed parser
+                # ------------------------------------------------
+                readme_text = uploaded_file.getvalue().decode(
+                    "utf-8-sig",
+                    errors="replace",
+                )
 
-                document_id = get_document_id(positioned)
+                pubmed_documents, missing_pmids = (
+                    load_pubmed_documents_from_readme_text(
+                        readme_text,
+                        source_name=uploaded_file.name,
+                    )
+                )
 
-                if document_id in accepted_document_ids:
-                    raise ValueError(
-                        "Duplicate document ID detected: "
-                        f"{document_id}"
+                for pmid in missing_pmids:
+                    errors.append(
+                        {
+                            "filename": f"PMID {pmid}",
+                            "error": (
+                                "PubMed record was not returned "
+                                "by NCBI EFetch."
+                            ),
+                        }
                     )
 
-                accepted_document_ids.add(document_id)
+                for document in pubmed_documents:
+                    try:
+                        accept_document(document)
 
-                processed_documents.append(processed)
-                positioned_documents.append(positioned)
+                    except Exception as error:
+                        errors.append(
+                            {
+                                "filename": (
+                                    f"PMID {document.get('pmid', '')}"
+                                    or uploaded_file.name
+                                ),
+                                "error": (
+                                    f"{type(error).__name__}: {error}"
+                                ),
+                            }
+                        )
 
             except Exception as error:
                 errors.append(
@@ -1004,9 +1326,7 @@ def build_uploaded_documents(uploaded_files):
                     }
                 )
 
-    # M04
-    #
-    # 只有成功通過 M01 ~ M03 的文件才會進入索引。
+    # M04 — only documents that passed M01 ~ M03 enter the index.
     index_data = (
         build_index(positioned_documents)
         if positioned_documents
@@ -1031,18 +1351,14 @@ def document_stats_rows(processed_documents):
     for document in processed_documents:
         rows.append(
             {
-                "PMCID": document["pmcid"],
+                "PMID": document.get("pmid", ""),
                 "File": document["filename"],
                 "Format": document.get("source_format", "Unknown"),
-                "Characters": f"{document['character_count']:,}",
-                # M02 自行計算的字數：只改顯示格式，不改實際統計值。
-                "Computed Words": f"{document['computed_word_count']:,}",
-                # 缺少來源字數時顯示破折號；有數字時加入千分位。
-                "JATS Reported Words": (
-                    f"{document['jats_reported_word_count']:,}"
-                    if document.get("jats_reported_word_count") is not None
-                    else "—"
+                "Characters With Spaces": f"{document['character_count']:,}",
+                "Characters Without Spaces": (
+                    f"{document['character_count_without_spaces']:,}"
                 ),
+                "Words": f"{document['computed_word_count']:,}",
                 "Sentences": f"{document['sentence_count']:,}",
             }
         )
@@ -1263,10 +1579,21 @@ def build_segment_highlight_html(segment, segment_matches):
             else "100%"
         )
 
+        # Article Viewer adds viewer_index for Previous/Next navigation.
+        # Inline Search Results reuse this highlighter without viewer_index,
+        # so the HTML id must be optional.
+        viewer_index = item.get("viewer_index")
+
+        match_id_attr = (
+            f'id="match-{viewer_index}" '
+            if viewer_index is not None
+            else ""
+        )
+
         pieces.append(
             (
                 '<span '
-                f'id="match-{item["viewer_index"]}" '
+                f'{match_id_attr}'
                 f'class="match {html_attr(match_type)}" '
                 f'data-type="{html_attr(match_type)}" '
                 f'data-field="{html_attr(item["field"])}" '
@@ -1289,6 +1616,326 @@ def build_segment_highlight_html(segment, segment_matches):
 
     return "".join(pieces)
 
+
+def build_inline_result_article_html(
+    document,
+    items,
+):
+    """Render one Search Result article with yellow match highlighting and match navigation."""
+
+    viewer_matches = prepare_viewer_matches(
+        items
+    )
+
+    matches_by_segment = defaultdict(list)
+
+    for item in viewer_matches:
+        matches_by_segment[
+            item["segment_id"]
+        ].append(item)
+
+    article_parts = []
+
+    source_format = document.get(
+        "source_format",
+        "Unknown",
+    )
+
+    if source_format == "PubMed":
+        article_parts.append(
+            '<div class="kfm-inline-heading">Abstract</div>'
+        )
+
+        for segment in document["segments"]:
+            if segment.get("field") != "abstract":
+                continue
+
+            segment_html = build_segment_highlight_html(
+                segment,
+                matches_by_segment.get(
+                    segment["segment_id"],
+                    [],
+                ),
+            )
+
+            label = (
+                segment.get("label", "")
+                or segment.get("nlm_category", "")
+                or ""
+            ).strip()
+
+            if label:
+                display_label = label.title()
+
+                article_parts.append(
+                    '<p class="kfm-inline-paragraph">'
+                    f'<span class="kfm-inline-label">{html.escape(display_label)}:</span> '
+                    f'{segment_html}'
+                    '</p>'
+                )
+            else:
+                article_parts.append(
+                    '<p class="kfm-inline-paragraph">'
+                    f'{segment_html}'
+                    '</p>'
+                )
+
+    else:
+        last_group = None
+
+        for segment in document["segments"]:
+            field = segment.get("field", "")
+
+            if field == "title":
+                continue
+
+            group = FIELD_GROUPS.get(field)
+
+            if group and group != last_group:
+                article_parts.append(
+                    '<div class="kfm-inline-group-heading">'
+                    f'{html.escape(group)}'
+                    '</div>'
+                )
+                last_group = group
+
+            segment_html = build_segment_highlight_html(
+                segment,
+                matches_by_segment.get(
+                    segment["segment_id"],
+                    [],
+                ),
+            )
+
+            article_parts.append(
+                '<p class="kfm-inline-paragraph">'
+                f'{segment_html}'
+                '</p>'
+            )
+
+    article_html = "".join(article_parts)
+    total_matches = len(viewer_matches)
+
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* {{ box-sizing: border-box; }}
+html {{ scroll-behavior: smooth; }}
+body {{
+    margin: 0;
+    background: transparent;
+    color: #1C2321;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}}
+.kfm-inline-shell {{
+    background: #FFFFFF;
+    border: 1px solid #D7E0D4;
+    border-radius: 12px;
+    overflow: hidden;
+}}
+.kfm-inline-nav {{
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(238, 242, 236, 0.97);
+    border-bottom: 1px solid #D7E0D4;
+}}
+.kfm-inline-nav button {{
+    border: 1px solid #8FBC8F;
+    background: #FFFFFF;
+    color: #2E4031;
+    border-radius: 7px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+}}
+.kfm-inline-nav button:hover {{ background: #E8EEE6; }}
+.kfm-inline-nav button:disabled {{ opacity: 0.35; cursor: default; }}
+.kfm-match-counter {{
+    min-width: 78px;
+    text-align: center;
+    color: #5F6D63;
+    font-size: 13px;
+    font-weight: 800;
+}}
+.kfm-inline-article {{
+    padding: 14px 18px 16px 18px;
+}}
+.kfm-inline-heading {{
+    color: #2E4031;
+    font-size: 1.18rem;
+    font-weight: 900;
+    margin: 0 0 10px 0;
+    padding-bottom: 7px;
+    border-bottom: 1px solid #D7E0D4;
+}}
+.kfm-inline-group-heading {{
+    color: #2E4031;
+    font-size: 1.08rem;
+    font-weight: 850;
+    margin: 18px 0 8px 0;
+}}
+.kfm-inline-paragraph {{
+    margin: 8px 0 10px 0;
+    line-height: 1.72;
+    font-size: 1.02rem;
+}}
+.kfm-inline-label {{
+    font-weight: 900;
+    color: #1C2321;
+}}
+.match {{
+    background: #FFF3B0;
+    border: 1px solid #E0B400;
+    border-radius: 4px;
+    padding: 0 2px;
+    font-weight: 900;
+}}
+.match.related {{
+    text-decoration: underline dotted #2E4031;
+    text-underline-offset: 3px;
+}}
+.match.active-match {{
+    background: #FFE27A;
+    outline: 3px solid #B88900;
+    outline-offset: 1px;
+}}
+</style>
+</head>
+<body>
+<div class="kfm-inline-shell">
+    <div class="kfm-inline-nav">
+        <button id="prev-match" onclick="previousMatch()">◀ Previous</button>
+        <span id="match-counter" class="kfm-match-counter">0 / {total_matches}</span>
+        <button id="next-match" onclick="nextMatch()">Next ▶</button>
+    </div>
+    <div class="kfm-inline-article">
+        {article_html}
+    </div>
+</div>
+<script>
+let currentIndex = 0;
+
+function getMatches() {{
+    return Array.from(document.querySelectorAll('.match'));
+}}
+
+function activateCurrentMatch(shouldScroll) {{
+    const matches = getMatches();
+    const counter = document.getElementById('match-counter');
+    const prev = document.getElementById('prev-match');
+    const next = document.getElementById('next-match');
+
+    matches.forEach(el => el.classList.remove('active-match'));
+
+    if (matches.length === 0) {{
+        counter.textContent = '0 / 0';
+        prev.disabled = true;
+        next.disabled = true;
+        return;
+    }}
+
+    if (currentIndex < 0) currentIndex = 0;
+    if (currentIndex >= matches.length) currentIndex = matches.length - 1;
+
+    const current = matches[currentIndex];
+    current.classList.add('active-match');
+
+    counter.textContent = (currentIndex + 1) + ' / ' + matches.length;
+    prev.disabled = currentIndex === 0;
+    next.disabled = currentIndex === matches.length - 1;
+
+    if (shouldScroll) {{
+        // Scroll only inside this Streamlit component iframe.
+        // scrollIntoView() can propagate across the iframe boundary and
+        // move the whole Streamlit page, which makes the sticky Next/Previous
+        // controls leave the user's viewport.  Use the iframe's own scroll
+        // position instead.
+        const nav = document.querySelector('.kfm-inline-nav');
+        const navHeight = nav ? nav.offsetHeight : 0;
+        const rect = current.getBoundingClientRect();
+        const currentScrollTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 600;
+        const targetTop = (
+            currentScrollTop
+            + rect.top
+            - navHeight
+            - (viewportHeight / 2)
+            + (rect.height / 2)
+        );
+
+        window.scrollTo({{
+            top: Math.max(0, targetTop),
+            behavior: 'smooth'
+        }});
+    }}
+}}
+
+function previousMatch() {{
+    if (currentIndex > 0) {{
+        currentIndex -= 1;
+        activateCurrentMatch(true);
+    }}
+}}
+
+function nextMatch() {{
+    const matches = getMatches();
+    if (currentIndex < matches.length - 1) {{
+        currentIndex += 1;
+        activateCurrentMatch(true);
+    }}
+}}
+
+window.addEventListener('load', () => activateCurrentMatch(false));
+</script>
+</body>
+</html>
+"""
+
+
+def estimate_inline_article_height(document):
+    """Approximate a comfortable iframe height for the inline article."""
+
+    searchable_segments = [
+        segment
+        for segment in document.get("segments", [])
+        if segment.get("field") != "title"
+    ]
+
+    total_characters = sum(
+        len(segment.get("text", ""))
+        for segment in searchable_segments
+    )
+
+    paragraph_count = max(
+        1,
+        len(searchable_segments),
+    )
+
+    estimated_lines = max(
+        4,
+        total_characters / 115,
+    )
+
+    estimated_height = int(
+        115
+        + estimated_lines * 24
+        + paragraph_count * 18
+    )
+
+    return max(
+        300,
+        min(820, estimated_height),
+    )
 
 def render_article_segment(field, content_html):
     if field == "title":
@@ -2036,7 +2683,7 @@ with st.sidebar:
     st.header("Keyword-based Full-Text Matching")
 
     st.caption(
-        "Educational prototype for JATS, BioC, and Generic XML"
+        "Educational prototype for PubMed, JATS, BioC, and Generic XML"
     )
 
     st.divider()
@@ -2095,55 +2742,58 @@ render_hero()
 render_section_header(
     "01",
     "Load Documents",
-    "Upload biomedical XML files, then build the positional index.",
+    "Upload PMID TXT/README or XML (PubMed, JATS, BioC, Generic). Input type is detected automatically.",
 )
 
-st.caption(
-    "Supported input: JATS XML · BioC XML · Generic XML fallback"
-)
-
-uploaded_files = st.file_uploader(
-    "Upload XML files",
-    type=["xml"],
+input_files = st.file_uploader(
+    "Upload documents",
+    type=["txt", "xml"],
     accept_multiple_files=True,
+    key="unified_document_uploader",
     label_visibility="collapsed",
 )
 
-if uploaded_files:
-    selected_count = len(uploaded_files)
-
+if input_files:
     st.markdown(
-        f"**Selected files:** {selected_count}"
+        f"**Selected files:** {len(input_files)}"
     )
 
-    with st.expander(
-        "View selected files",
-        expanded=False,
-    ):
-        for uploaded_file in uploaded_files:
-            st.write(
-                f"- {uploaded_file.name}"
-            )
+    if SHOW_SELECTED_FILES_DETAILS:
+        with st.expander(
+            "View selected files",
+            expanded=False,
+        ):
+            for uploaded_file in input_files:
+                detected_type = (
+                    "XML"
+                    if detect_uploaded_input_type(uploaded_file) == "xml"
+                    else "PMID text"
+                )
+                st.write(
+                    f"- {uploaded_file.name} — {detected_type}"
+                )
 
+
+has_input = bool(input_files)
 
 build_button = st.button(
     "Analyze & Build Index",
     type="primary",
-    disabled=not uploaded_files,
+    disabled=not has_input,
 )
 
 
 if build_button:
     with st.spinner(
-        "Parsing XML and building positional index..."
+        "Loading documents and building positional index..."
     ):
         (
             processed_documents,
             positioned_documents,
             index_data,
             errors,
-        ) = build_uploaded_documents(
-            uploaded_files
+        ) = build_input_documents(
+            input_files=input_files,
         )
 
         st.session_state[
@@ -2164,8 +2814,8 @@ if build_button:
 
         st.session_state[
             "build_signature"
-        ] = uploaded_signature(
-            uploaded_files
+        ] = input_signature(
+            input_files
         )
 
         st.session_state[
@@ -2191,7 +2841,7 @@ if build_button:
 
 if not st.session_state["index_ready"]:
     st.info(
-        "Choose XML files, then click "
+        "Choose TXT or XML files, then click "
         "'Analyze & Build Index'."
     )
     st.stop()
@@ -2219,18 +2869,18 @@ index_data = (
     ]
 )
 
-current_signature = uploaded_signature(
-    uploaded_files
+current_signature = input_signature(
+    input_files
 )
 
 if (
-    uploaded_files
+    input_files
     and st.session_state["build_signature"]
     and current_signature
     != st.session_state["build_signature"]
 ):
     st.warning(
-        "The uploaded file selection has changed. "
+        "The selected input files have changed. "
         "Click 'Analyze & Build Index' again before searching."
     )
 
@@ -2292,10 +2942,15 @@ with metric3:
 
 
 # ============================================================
-# ARTICLE VIEW MODE
+# ARTICLE VIEW MODE (legacy)
 # ============================================================
-
+# Search Results now render article text inline.  Reset any old session
+# that was left in the previous separate Article View.
 if st.session_state["view_mode"] == "article":
+    st.session_state["view_mode"] = "search"
+    st.session_state["selected_document_id"] = None
+
+if False and st.session_state["view_mode"] == "article":
 
     result = st.session_state[
         "search_result"
@@ -2586,12 +3241,12 @@ with st.expander(
         table_rows.append(
             "<tr>"
             f'<td>{row_number}</td>'
-            f'<td>{html.escape(str(row["PMCID"] or "—"))}</td>'
+            f'<td>{html.escape(str(row["PMID"] or "—"))}</td>'
             f'<td>{html.escape(str(row["File"]))}</td>'
             f'<td>{html.escape(str(row["Format"]))}</td>'
-            f'<td>{html.escape(str(row["Characters"]))}</td>'
-            f'<td>{html.escape(str(row["Computed Words"]))}</td>'
-            f'<td>{html.escape(str(row["JATS Reported Words"]))}</td>'
+            f'<td>{html.escape(str(row["Characters With Spaces"]))}</td>'
+            f'<td>{html.escape(str(row["Characters Without Spaces"]))}</td>'
+            f'<td>{html.escape(str(row["Words"]))}</td>'
             f'<td>{html.escape(str(row["Sentences"]))}</td>'
             "</tr>"
         )
@@ -2601,12 +3256,12 @@ with st.expander(
         '<table class="kfm-stats-table">'
         '<thead><tr>'
         '<th>No.</th>'
-        '<th>PMCID</th>'
+        '<th>PMID</th>'
         '<th>XML File</th>'
         '<th>XML Format</th>'
-        '<th>Characters</th>'
-        '<th>Computed Words</th>'
-        '<th>Reported Words</th>'
+        '<th>Characters<br>(with spaces)</th>'
+        '<th>Characters<br>(without spaces)</th>'
+        '<th>Words</th>'
         '<th>Sentences</th>'
         '</tr></thead>'
         '<tbody>'
@@ -2620,12 +3275,11 @@ with st.expander(
     )
 
     st.caption(
-        "Document Statistics use a dedicated statistics corpus. "
-        "For JATS, the scope is Front (excluding permissions) + Body + Back; "
-        "for BioC, all visible passage text; for Generic XML, all visible text. "
-        "Computed Words use the shared Regex tokenizer, Sentences use pySBD, "
-        "and Reported Words come from the source XML when available. "
-        "Statistics and Search use the same Regex tokenizer, while their corpus scopes remain different."
+        "Document Statistics are computed by this system. "
+        "PubMed records use the Abstract as the statistics corpus; "
+        "JATS uses Front (excluding permissions) + Body + Back; "
+        "BioC uses all visible passage text; Generic XML uses all visible text. "
+        "Words use whitespace segmentation for Document Statistics; Search indexing keeps its Regex tokenizer. Sentences use pySBD."
     )
 
 
@@ -2679,14 +3333,6 @@ with st.form(
             use_container_width=True,
         )
 
-
-st.markdown(
-    '<div class="kfm-search-help">'
-    'Examples: cancer · physical activity · '
-    'This study reviews the evidence to clarify association.'
-    '</div>',
-    unsafe_allow_html=True,
-)
 
 
 query_type_map = {
@@ -2832,7 +3478,7 @@ render_subheading("Search Results")
 
 st.caption(
     "One card per matching document. "
-    "Open an article to jump through every match."
+    "The article text is shown directly below the match counts."
 )
 
 grouped = group_results_by_document(
@@ -2842,6 +3488,12 @@ grouped = group_results_by_document(
 document_lookup = (
     build_positioned_document_lookup(
         positioned_documents
+    )
+)
+
+processed_document_lookup = (
+    build_processed_document_lookup(
+        processed_documents
     )
 )
 
@@ -2860,10 +3512,6 @@ for result_number, (document_id, items) in enumerate(
         count_match_types(
             items
         )
-    )
-
-    snippet_item = choose_document_snippet(
-        items
     )
 
     with st.container(
@@ -2893,73 +3541,45 @@ for result_number, (document_id, items) in enumerate(
                 "Unknown",
             )
 
+            display_identifier = (
+                document.get("pmid")
+                or document_id
+            )
+
+            identifier_label = (
+                f"PMID {display_identifier}"
+                if document.get("pmid")
+                else str(display_identifier)
+            )
+
             st.markdown(
                 (
                     '<div class="kfm-meta-row">'
-                    f'<span class="kfm-chip">{html.escape(str(document_id))}</span>'
+                    f'<span class="kfm-chip">{html.escape(identifier_label)}</span>'
                     f'<span class="kfm-chip format">{html.escape(str(source_format))}</span>'
                     '</div>'
                 ),
                 unsafe_allow_html=True,
             )
 
-            result_kpi1, result_kpi2, result_kpi3 = (
-                st.columns(3)
+            stats_document = processed_document_lookup.get(
+                document_id
             )
 
-            with result_kpi1:
-                render_result_kpi(
-                    "Exact Matches",
-                    exact_count,
-                    "exact",
-                )
+            render_result_metrics_grid(
+                exact_count=exact_count,
+                related_count=related_count,
+                total_count=len(items),
+                stats_document=stats_document,
+            )
 
-            with result_kpi2:
-                render_result_kpi(
-                    "Related Matches",
-                    related_count,
-                )
+            inline_article_html = build_inline_result_article_html(
+                document=document,
+                items=items,
+            )
 
-            with result_kpi3:
-                render_result_kpi(
-                    "Total Matches",
-                    len(items),
-                )
-
-            if snippet_item:
-                snippet_html = highlight_snippet(
-                    context=snippet_item["context"],
-                    matched_text=snippet_item[
-                        "matched_text"
-                    ],
-                    match_type=snippet_item[
-                        "match_type"
-                    ],
-                )
-
-                st.markdown(
-                    (
-                        '<div class="kfm-snippet">'
-                        f"{snippet_html}"
-                        "</div>"
-                    ),
-                    unsafe_allow_html=True,
-                )
-
-            if st.button(
-                "Open Article",
-                key=(
-                    "open_article_"
-                    + document_id
-                ),
-                type="primary",
-            ):
-                st.session_state[
-                    "selected_document_id"
-                ] = document_id
-
-                st.session_state[
-                    "view_mode"
-                ] = "article"
-
-                st.rerun()
+            components.html(
+                inline_article_html,
+                height=estimate_inline_article_height(document),
+                scrolling=True,
+            )

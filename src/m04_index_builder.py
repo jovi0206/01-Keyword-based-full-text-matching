@@ -56,6 +56,23 @@ def normalize_term(term):
 
 
 # ============================================================
+# 2. DOCUMENT ID
+# ============================================================
+#
+# JATS / BioC commonly have PMCID.
+# PubMed README mode always has PMID, but may not have PMCID.
+# Generic XML falls back to filename.
+# ============================================================
+
+def resolve_document_id(document):
+    return (
+        document.get("pmcid")
+        or document.get("pmid")
+        or document["filename"]
+    )
+
+
+# ============================================================
 # 2. FIND SENTENCE INDEX
 # ============================================================
 #
@@ -126,9 +143,8 @@ def build_index(
 
     for document in positioned_documents:
 
-        document_id = (
-            document["pmcid"]
-            or document["filename"]
+        document_id = resolve_document_id(
+            document
         )
 
         # ----------------------------------------------------
@@ -140,8 +156,23 @@ def build_index(
             "filename":
                 document["filename"],
 
+            "source_format":
+                document.get(
+                    "source_format",
+                    "Unknown"
+                ),
+
             "pmcid":
-                document["pmcid"],
+                document.get("pmcid", ""),
+
+            "pmid":
+                document.get("pmid", ""),
+
+            "doi":
+                document.get("doi", ""),
+
+            "journal":
+                document.get("journal", ""),
 
             "title":
                 document["title"],
