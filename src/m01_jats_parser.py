@@ -3076,10 +3076,13 @@ def parse_generic_xml(
 #     ↓
 # Structured Document
 #
-# PubMed mode in this project intentionally uses Abstract as the
-# Statistics Corpus and Search Corpus.  Title / Authors / Journal /
-# DOI are retained as metadata for display, but are not mixed into
-# the Abstract text statistics/search scope.
+# PubMed mode uses the professor-selected visible Abstract block as
+# the Statistics Corpus.  For structured abstracts, visible section
+# labels (e.g. Background / Methods / Results / Conclusion) are
+# included in Character / Word statistics, while Keywords remain
+# outside the scope.  Search Corpus still uses AbstractText body text
+# only so the retrieval/index pipeline is unchanged.  Title / Authors /
+# Journal / DOI remain metadata for display.
 # ============================================================
 
 PUBMED_EFETCH_URL = (
@@ -3334,8 +3337,9 @@ def _pubmed_abstract(article):
         <AbstractText Label="BACKGROUND">...</AbstractText>
 
     The previous parser kept the text but lost the label-to-text pairing.
-    This version preserves that structure for later UI rendering while the
-    label itself is NOT mixed into the Abstract statistics/search corpus.
+    This version preserves that structure for later UI rendering.  The
+    visible label is included in PubMed Document Statistics, but Search
+    Corpus continues to use only the AbstractText body text.
     """
 
     section_titles = []
@@ -3485,8 +3489,55 @@ def parse_pubmed_article_element(
         " ".join(abstract_paragraphs)
     )
 
+    # --------------------------------------------------------
+    # PubMed Statistics Corpus
+    # --------------------------------------------------------
+    # Follow the professor-selected visible Abstract range:
+    #
+    #     Background: <AbstractText ...>
+    #     Methods:    <AbstractText ...>
+    #     Results:    <AbstractText ...>
+    #     ...
+    #
+    # Visible structured-abstract labels are part of Character / Word
+    # statistics.  Keywords are stored separately in <KeywordList> and
+    # therefore remain outside this corpus.
+    #
+    # Search Corpus is intentionally unchanged: M02 still indexes only
+    # section["text"], not the labels.
+    # --------------------------------------------------------
+
+    statistics_parts = []
+
+    for section in abstract_sections:
+        label = normalize_statistics_text(
+            section.get("label", "")
+        )
+        section_text = normalize_statistics_text(
+            section.get("text", "")
+        )
+
+        if label:
+            # PubMed's visible page renders the section heading with a colon.
+            # Keeping it here makes Character statistics follow that visible
+            # Abstract range while whitespace word counting still treats the
+            # label as exactly one word.
+            statistics_parts.append(
+                f"{label}:"
+            )
+
+        if section_text:
+            statistics_parts.append(
+                section_text
+            )
+
+    pubmed_statistics_text = normalize_statistics_text(
+        " ".join(statistics_parts)
+    )
+
     # Professor's PubMed demo scope:
-    # only the visible Abstract text block enters Statistics/Search.
+    # Statistics = visible Abstract range (labels + AbstractText).
+    # Search      = AbstractText body only.
     document = {
         "filename": f"PMID_{pmid}.xml",
         "source_name": source_name,
@@ -3524,12 +3575,16 @@ def parse_pubmed_article_element(
         "acknowledgments": [],
         "references": [],
 
-        # Statistics Corpus = Abstract only.
+        # Statistics Corpus = visible PubMed Abstract range.
+        # Structured-abstract labels are included; Keywords are excluded.
         "statistics_front_text": "",
-        "statistics_body_text": abstract_text,
+        "statistics_body_text": pubmed_statistics_text,
         "statistics_back_text": "",
-        "statistics_text": abstract_text,
-        "statistics_scope": "PubMed Abstract only",
+        "statistics_text": pubmed_statistics_text,
+        "statistics_scope": (
+            "PubMed visible Abstract "
+            "(section labels + text; Keywords excluded)"
+        ),
 
         # PubMed citation XML does not provide JATS article counts.
         "reported_word_count": None,

@@ -132,9 +132,11 @@ def normalize_stats_text(text):
 # Statistics Corpus 與 Search Corpus 的「範圍」與「分詞目的」不同。
 #
 # Statistics Corpus:
-#     用於 Characters / Words / Sentences
+#     用於 Characters / Words / Sentences。
+#     PubMed structured abstract 的可見 section labels 由 M01
+#     納入 Characters / Words；Sentence Count 仍只對正文切句。
 #     Words 採 whitespace segmentation（text.split()）。
-#     目的：提供簡單、可重現、接近一般文書軟體的 word count。
+#     目的：提供簡單、可重現、接近教授圈選可見範圍的 word count。
 #
 # Search Corpus:
 #     用於 Position Mapping / Inverted Index / Search
@@ -934,6 +936,10 @@ def process_document(document):
     # --------------------------------------------------------
     #
     # M01 新版會提供 statistics_text：
+    #
+    # PubMed:
+    #     教授圈選的 visible Abstract range
+    #     （section labels + AbstractText；Keywords excluded）
     #
     # JATS:
     #     Front (excluding permissions)
