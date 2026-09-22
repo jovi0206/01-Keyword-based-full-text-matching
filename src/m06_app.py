@@ -2727,6 +2727,14 @@ Current match → yellow highlight
         "Not a complete PMC ATM / MeSH / UMLS implementation."
     )
 
+    st.divider()
+
+    st.link_button(
+        "Project Presentation (PDF)",
+        "https://raw.githubusercontent.com/jovi0206/01-Keyword-based-full-text-matching/main/doc/Project1_Presentation.pdf",
+        use_container_width=True,
+    )
+
 
 # ============================================================
 # HEADER
